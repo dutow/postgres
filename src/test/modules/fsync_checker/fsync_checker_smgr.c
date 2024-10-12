@@ -59,12 +59,14 @@ static const struct f_smgr fsync_checker_smgr = {
 	.smgr_prefetch = mdprefetch,
 	.smgr_maxcombine = mdmaxcombine,
 	.smgr_readv = mdreadv,
+	.smgr_startreadv = mdstartreadv,
 	.smgr_writev = fsync_checker_writev,
 	.smgr_writeback = fsync_checker_writeback,
 	.smgr_nblocks = mdnblocks,
 	.smgr_truncate = mdtruncate,
 	.smgr_immedsync = fsync_checker_immedsync,
 	.smgr_registersync = mdregistersync,
+	.smgr_fd = mdfd,
 };
 
 static HTAB *volatile_relns;
@@ -115,13 +117,11 @@ fsync_checker_checkpoint_create(const CheckPoint *checkPoint)
 	{
 		if (entry->lsn < checkPoint->redo)
 		{
-			char	   *path;
+			RelPathStr	path;
 
 			path = relpathperm(entry->key.locator, entry->key.forknum);
 
-			elog(WARNING, "Relation not previously synced: %s", path);
-
-			pfree(path);
+			elog(WARNING, "Relation not previously synced: %s", path.str);
 		}
 	}
 
