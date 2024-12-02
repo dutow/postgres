@@ -2664,6 +2664,7 @@ SID_IDENTIFIER_AUTHORITY
 SID_NAME_USE
 SISeg
 SIZE_T
+SMgrChain
 SMgrRelation
 SMgrRelationData
 SMgrSortArray
