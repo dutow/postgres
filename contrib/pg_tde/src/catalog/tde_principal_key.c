@@ -109,7 +109,7 @@ Datum		pg_tde_set_default_principal_key(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(pg_tde_set_principal_key);
 Datum		pg_tde_set_principal_key(PG_FUNCTION_ARGS);
 
-PG_FUNCTION_INFO_V1(pg_tde_set_principal_key_global);
+PG_FUNCTION_INFO_V1(pg_tde_set_global_principal_key);
 Datum		pg_tde_set_principal_key(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_tde_set_principal_key_server);
@@ -565,8 +565,8 @@ Datum
 pg_tde_set_default_principal_key(PG_FUNCTION_ARGS)
 {
 	char	   *principal_key_name = text_to_cstring(PG_GETARG_TEXT_PP(0));
-	char	   *provider_name = PG_ARGISNULL(2) ? NULL : text_to_cstring(PG_GETARG_TEXT_PP(2));
-	bool		ensure_new_key = PG_GETARG_BOOL(3);
+	char	   *provider_name = PG_ARGISNULL(1) ? NULL : text_to_cstring(PG_GETARG_TEXT_PP(1));
+	bool		ensure_new_key = PG_GETARG_BOOL(2);
 
 	return pg_tde_set_principal_key_internal(principal_key_name, GS_DEFAULT, provider_name, ensure_new_key);
 }
@@ -582,7 +582,7 @@ pg_tde_set_principal_key(PG_FUNCTION_ARGS)
 }
 
 Datum
-pg_tde_set_principal_key_global(PG_FUNCTION_ARGS)
+pg_tde_set_global_principal_key(PG_FUNCTION_ARGS)
 {
 	char	   *principal_key_name = text_to_cstring(PG_GETARG_TEXT_PP(0));
 	char	   *provider_name = PG_ARGISNULL(2) ? NULL : text_to_cstring(PG_GETARG_TEXT_PP(2));
@@ -679,9 +679,9 @@ pg_tde_principal_key_info(PG_FUNCTION_ARGS)
 	return pg_tde_get_key_info(fcinfo, MyDatabaseId);
 }
 
-PG_FUNCTION_INFO_V1(pg_tde_principal_key_info_global);
+PG_FUNCTION_INFO_V1(pg_tde_global_principal_key_info);
 Datum
-pg_tde_principal_key_info_global(PG_FUNCTION_ARGS)
+pg_tde_global_principal_key_info(PG_FUNCTION_ARGS)
 {
 	return pg_tde_get_key_info(fcinfo, GLOBAL_DATA_TDE_OID);
 }
