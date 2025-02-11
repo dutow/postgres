@@ -89,17 +89,9 @@ SELECT  key_provider_id, key_provider_name, principal_key_name
               -4 | file-provider     | new-default-principal-key
 (1 row)
 
-DROP TABL test_enc;
-ERROR:  syntax error at or near "TABL"
-LINE 1: DROP TABL test_enc;
-             ^
+DROP TABLE test_enc;
 DROP EXTENSION pg_tde CASCADE;
-NOTICE:  drop cascades to table test_enc
 \c regression_pg_tde
-DROP TABL test_enc;
-ERROR:  syntax error at or near "TABL"
-LINE 1: DROP TABL test_enc;
-             ^
+DROP TABLE test_enc;
 DROP EXTENSION pg_tde CASCADE;
-NOTICE:  drop cascades to table test_enc
 DROP DATABASE regress_pg_tde_other;

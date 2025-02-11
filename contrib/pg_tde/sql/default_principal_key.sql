@@ -60,13 +60,13 @@ SELECT  key_provider_id, key_provider_name, principal_key_name
 SELECT  key_provider_id, key_provider_name, principal_key_name
 		FROM pg_tde_principal_key_info();
 
-DROP TABL test_enc;
+DROP TABLE test_enc;
 
 DROP EXTENSION pg_tde CASCADE;
 
 \c regression_pg_tde
 
-DROP TABL test_enc;
+DROP TABLE test_enc;
 
 DROP EXTENSION pg_tde CASCADE;
 

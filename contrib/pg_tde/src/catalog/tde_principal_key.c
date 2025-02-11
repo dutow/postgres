@@ -1058,11 +1058,11 @@ pg_tde_update_global_principal_key_everywhere(TDEPrincipalKey *oldKey, TDEPrinci
 
 
 	/*
-	 * Take exclusive lock, as we do not want anybody to create/drop a
-	 * database in parallel
+	 * Take row exclusive lock, as we do not want anybody to create/drop a
+	 * database in parallel. If it happens, its not the end of the world, but
+	 * not ideal
 	 */
-	/* If it happens, its not the end of the world, but not ideal */
-	rel = table_open(DatabaseRelationId, ExclusiveLock);
+	rel = table_open(DatabaseRelationId, RowExclusiveLock);
 
 	scan = systable_beginscan(rel, 0, false, NULL, 0, NULL);
 
