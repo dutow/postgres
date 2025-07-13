@@ -17,6 +17,7 @@
 #include "access/pg_tde_xlog_smgr.h"
 #include "catalog/tde_global_space.h"
 #include "encryption/enc_tde.h"
+#include "encryption/enc_aes.h"
 #include "pg_tde.h"
 #include "pg_tde_defines.h"
 #include "pg_tde_guc.h"
@@ -156,22 +157,26 @@ static ssize_t
 TDEXLogWriteEncryptedPages(int fd, const void *buf, size_t count, off_t offset,
 						   TimeLineID tli, XLogSegNo segno)
 {
-	char		iv_prefix[16];
-	InternalKey *key = &EncryptionKey;
 	char	   *enc_buff = EncryptionState->segBuf;
+
+	static off_t previous_offset = 9999999999999999;
+
+	if(offset != previous_offset) {
+		// reinitialize CTX, report warning?
+		char		iv_prefix[16];
+		InternalKey *key = &EncryptionKey;
+
+		CalcXLogPageIVPrefix(tli, segno, key->base_iv, iv_prefix); // TODO: probably incorrect!
+		AesCtrInit((EVP_CIPHER_CTX **)&EncryptionCryptCtx, key->key, (unsigned char*)iv_prefix);
+		elog(WARNING, "Reinitializing WAL encryption context %lu %lu", offset, previous_offset);
+	} // else: CTX is good, just use it
 
 	Assert(count <= TDEXLogEncryptBuffSize());
 
-#ifdef TDE_XLOG_DEBUG
-	elog(DEBUG1, "write encrypted WAL, size: %lu, offset: %ld [%lX], seg: %X/%X, key_start_lsn: %X/%X",
-		 count, offset, offset, LSN_FORMAT_ARGS(segno), LSN_FORMAT_ARGS(key->start_lsn));
-#endif
+	previous_offset = offset + count;
 
-	CalcXLogPageIVPrefix(tli, segno, key->base_iv, iv_prefix);
-	pg_tde_stream_crypt(iv_prefix, offset,
-						(char *) buf, count,
-						enc_buff, key, &EncryptionCryptCtx);
-
+	AesCtrEncrypt((EVP_CIPHER_CTX **)&EncryptionCryptCtx, buf, count, (unsigned char*)enc_buff);
+	
 	return pg_pwrite(fd, enc_buff, count, offset);
 }
 
