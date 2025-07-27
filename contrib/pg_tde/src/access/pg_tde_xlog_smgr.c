@@ -41,6 +41,7 @@ static const XLogSmgr tde_xlog_smgr = {
 
 static void *EncryptionCryptCtx = NULL;
 
+
 /* TODO: can be swapped out to the disk */
 static InternalKey EncryptionKey =
 {
@@ -239,7 +240,7 @@ TDEXLogWriteEncryptedPages(int fd, const void *buf, size_t count, off_t offset,
 	char		iv_prefix[16];
 	InternalKey *key = &EncryptionKey;
 	char	   *enc_buff = EncryptionBuf;
-
+	
 #ifndef FRONTEND
 	Assert(count <= TDEXLogEncryptBuffSize());
 #endif
@@ -249,7 +250,7 @@ TDEXLogWriteEncryptedPages(int fd, const void *buf, size_t count, off_t offset,
 		 count, offset, offset, LSN_FORMAT_ARGS(segno), LSN_FORMAT_ARGS(key->start_lsn));
 #endif
 
-	CalcXLogPageIVPrefix(tli, segno, key->base_iv, iv_prefix);
+	CalcXLogPageIVPrefix(tli, segno, key->base_iv, iv_prefix);	
 	pg_tde_stream_crypt(iv_prefix, offset,
 						(char *) buf, count,
 						enc_buff, key, &EncryptionCryptCtx);

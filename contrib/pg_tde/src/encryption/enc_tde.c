@@ -11,7 +11,7 @@
 #endif
 
 #define AES_BLOCK_SIZE 		        16
-#define NUM_AES_BLOCKS_IN_BATCH     200
+#define NUM_AES_BLOCKS_IN_BATCH     506
 #define DATA_BYTES_PER_AES_BATCH    (NUM_AES_BLOCKS_IN_BATCH * AES_BLOCK_SIZE)
 
 #ifdef ENCRYPTION_DEBUG
@@ -44,6 +44,9 @@ pg_tde_generate_internal_key(InternalKey *int_key, TDEMapEntryType entry_type)
 					   ERR_error_string(ERR_get_error(), NULL)));
 }
 
+static off_t EncryptionLastOffset = 0;
+static size_t EncryptionLastEnd = 0;
+
 /*
  * Encrypts/decrypts `data` with a given `key`. The result is written to `out`.
  *
@@ -65,7 +68,14 @@ pg_tde_stream_crypt(const char *iv_prefix, uint32 start_offset, const char *data
 		uint32		current_batch_bytes;
 		uint64		batch_end_block = Min(batch_start_block + NUM_AES_BLOCKS_IN_BATCH, aes_end_block);
 
-		AesCtrEncryptedZeroBlocks(ctxPtr, key->key, iv_prefix, batch_start_block, batch_end_block, enc_key);
+		if(batch_start_block != EncryptionLastOffset || batch_end_block != EncryptionLastEnd)
+		{
+			// ctxPtr is always the same, we can reuse the previous block otheriwise
+			AesCtrEncryptedZeroBlocks(ctxPtr, key->key, iv_prefix, batch_start_block, batch_end_block, enc_key);
+
+			EncryptionLastOffset = batch_start_block;
+			EncryptionLastEnd = batch_end_block;
+		}
 
 #ifdef ENCRYPTION_DEBUG
 		{
