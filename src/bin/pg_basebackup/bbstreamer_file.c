@@ -248,7 +248,7 @@ bbstreamer_extractor_content(bbstreamer *streamer, bbstreamer_member *member,
 				 * Don't rewrite WAL keys and providers. User may have different
 				 * one on source and target.
 				 */
-				if (strncmp(member->pathname, "pg_tde/1664_", 12) == 0)
+				if (strncmp(member->pathname, "pg_tde/1664_keys", 16) == 0)
 					break;
 #endif
 				mystreamer->file =
