@@ -365,5 +365,8 @@ extern void pgaio_closing_fd(int fd);
 extern PGDLLIMPORT int io_method;
 extern PGDLLIMPORT int io_max_concurrency;
 
+typedef ssize_t (*preadv_f)(int fd, const struct iovec *iov, int iovcnt, off_t offset);
+
+extern PGDLLIMPORT preadv_f aio_preadv;
 
 #endif							/* AIO_H */

@@ -24,6 +24,7 @@
 #include "storage/fd.h"
 #include "utils/wait_event.h"
 
+preadv_f aio_preadv = pg_preadv;
 
 static void pgaio_io_before_start(PgAioHandle *ioh);
 
@@ -101,7 +102,6 @@ pgaio_io_start_writev(PgAioHandle *ioh,
 }
 
 
-
 /* --------------------------------------------------------------------------------
  * Internal IO related functions operating on IO Handles
  * --------------------------------------------------------------------------------
@@ -125,7 +125,7 @@ pgaio_io_perform_synchronously(PgAioHandle *ioh)
 	{
 		case PGAIO_OP_READV:
 			pgstat_report_wait_start(WAIT_EVENT_DATA_FILE_READ);
-			result = pg_preadv(ioh->op_data.read.fd, iov,
+			result = aio_preadv(ioh->op_data.read.fd, iov,
 							   ioh->op_data.read.iov_length,
 							   ioh->op_data.read.offset);
 			pgstat_report_wait_end();
