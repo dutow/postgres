@@ -125,7 +125,7 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
  * when initializing dynamically with a DSM or when loading the module.
  */
 static void
-injection_point_init_state(void *ptr)
+injection_point_init_state(void *ptr, void *arg)
 {
 	InjectionPointSharedState *state = (InjectionPointSharedState *) ptr;
 
@@ -189,6 +189,7 @@ injection_init_shmem(void)
 	inj_state = GetNamedDSMSegment("injection_points",
 								   sizeof(InjectionPointSharedState),
 								   injection_point_init_state,
+								   NULL,
 								   &found);
 }
 

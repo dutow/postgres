@@ -180,11 +180,13 @@ init_dsm_registry(void)
  * Initialize or attach a named DSM segment.
  *
  * This routine returns the address of the segment.  init_callback is called to
- * initialize the segment when it is first created.
+ * initialize the segment when it is first created.  callback_arg is passed to
+ * the init_callback as an additional argument.
  */
 void *
 GetNamedDSMSegment(const char *name, size_t size,
-				   void (*init_callback) (void *ptr), bool *found)
+				   void (*init_callback) (void *ptr, void *arg),
+				   void *callback_arg, bool *found)
 {
 	DSMRegistryEntry *entry;
 	MemoryContext oldcontext;
@@ -235,7 +237,7 @@ GetNamedDSMSegment(const char *name, size_t size,
 		seg = dsm_create(size, 0);
 
 		if (init_callback)
-			(*init_callback) (dsm_segment_address(seg));
+			(*init_callback) (dsm_segment_address(seg), callback_arg);
 
 		dsm_pin_segment(seg);
 		dsm_pin_mapping(seg);

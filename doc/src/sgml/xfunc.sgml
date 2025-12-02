@@ -3696,15 +3696,18 @@ LWLockRelease(AddinShmemInitLock);
       use the shared memory should obtain a pointer to it by calling:
 <programlisting>
 void *GetNamedDSMSegment(const char *name, size_t size,
-                         void (*init_callback) (void *ptr),
+                         void (*init_callback) (void *ptr, void *arg),
+                         void *callback_arg,
                          bool *found)
 </programlisting>
       If a dynamic shared memory segment with the given name does not yet
       exist, this function will allocate it and initialize it with the provided
-      <function>init_callback</function> callback function.  If the segment has
-      already been allocated and initialized by another backend, this function
-      simply attaches the existing dynamic shared memory segment to the current
-      backend.
+      <function>init_callback</function> callback function.  The
+      <parameter>callback_arg</parameter> parameter is passed to the callback
+      function, allowing additional context to be provided during initialization.
+      If the segment has already been allocated and initialized by another backend,
+      this function simply attaches the existing dynamic shared memory segment to
+      the current backend.
      </para>
 
      <para>

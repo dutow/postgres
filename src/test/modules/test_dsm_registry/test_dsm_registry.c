@@ -44,7 +44,7 @@ static const dshash_parameters dsh_params = {
 };
 
 static void
-init_tdr_dsm(void *ptr)
+init_tdr_dsm(void *ptr, void *arg)
 {
 	TestDSMRegistryStruct *dsm = (TestDSMRegistryStruct *) ptr;
 
@@ -60,6 +60,7 @@ tdr_attach_shmem(void)
 	tdr_dsm = GetNamedDSMSegment("test_dsm_registry_dsm",
 								 sizeof(TestDSMRegistryStruct),
 								 init_tdr_dsm,
+								 NULL,
 								 &found);
 
 	if (tdr_dsa == NULL)

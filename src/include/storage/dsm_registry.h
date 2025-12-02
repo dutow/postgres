@@ -16,7 +16,8 @@
 #include "lib/dshash.h"
 
 extern void *GetNamedDSMSegment(const char *name, size_t size,
-								void (*init_callback) (void *ptr),
+								void (*init_callback) (void *ptr, void *arg),
+								void *callback_arg,
 								bool *found);
 extern dsa_area *GetNamedDSA(const char *name, bool *found);
 extern dshash_table *GetNamedDSHash(const char *name,
