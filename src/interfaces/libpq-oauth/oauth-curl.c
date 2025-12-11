@@ -277,7 +277,7 @@ struct async_ctx
 	int			running;		/* is asynchronous work in progress? */
 	bool		user_prompted;	/* have we already sent the authz prompt? */
 	bool		used_basic_auth;	/* did we send a client secret? */
-	bool		debugging;		/* can we give unsafe developer assistance? */
+	oauth_debug_flags debug_flags;	/* can we give developer assistance */
 	int			dbg_num_calls;	/* (debug mode) how many times were we called? */
 };
 
@@ -978,7 +978,7 @@ parse_interval(struct async_ctx *actx, const char *interval_str)
 	parsed = ceil(parsed);
 
 	if (parsed < 1)
-		return actx->debugging ? 0 : 1;
+		return actx->debug_flags.fast_retry ? 0 : 1;
 
 	else if (parsed >= INT_MAX)
 		return INT_MAX;
@@ -1753,7 +1753,7 @@ setup_curl_handles(struct async_ctx *actx)
 	 */
 	CHECK_SETOPT(actx, CURLOPT_NOSIGNAL, 1L, return false);
 
-	if (actx->debugging)
+	if (actx->debug_flags.trace)
 	{
 		/*
 		 * Set a callback for retrieving error information from libcurl, the
@@ -1785,7 +1785,7 @@ setup_curl_handles(struct async_ctx *actx)
 		const long	unsafe = CURLPROTO_HTTPS | CURLPROTO_HTTP;
 #endif
 
-		if (actx->debugging)
+		if (actx->debug_flags.http)
 			protos = unsafe;
 
 		CHECK_SETOPT(actx, popt, protos, return false);
@@ -1799,7 +1799,7 @@ setup_curl_handles(struct async_ctx *actx)
 	 * the flow to work at all, so any changes to the roots are likely to be
 	 * done system-wide.
 	 */
-	if (actx->debugging)
+	if (actx->debug_flags.custom_ca)
 	{
 		const char *env;
 
@@ -2265,7 +2265,7 @@ check_for_device_flow(struct async_ctx *actx)
 	 * decent time to bail out if we're not using HTTPS for the endpoints
 	 * we'll use for the flow.
 	 */
-	if (!actx->debugging)
+	if (!actx->debug_flags.http)
 	{
 		if (pg_strncasecmp(provider->device_authorization_endpoint,
 						   HTTPS_SCHEME, strlen(HTTPS_SCHEME)) != 0)
@@ -2787,8 +2787,8 @@ pg_fe_run_oauth_flow_impl(PGconn *conn)
 		actx->mux = PGINVALID_SOCKET;
 		actx->timerfd = -1;
 
-		/* Should we enable unsafe features? */
-		actx->debugging = oauth_unsafe_debugging_enabled();
+		/* Parse debug flags from environment */
+		actx->debug_flags = oauth_get_debug_flags();
 
 		state->async_ctx = actx;
 
@@ -3068,7 +3068,7 @@ pg_fe_run_oauth_flow(PGconn *conn)
 	actx = state->async_ctx;
 	Assert(actx || result == PGRES_POLLING_FAILED);
 
-	if (actx && actx->debugging)
+	if (actx && actx->debug_flags.poll_counts)
 	{
 		actx->dbg_num_calls++;
 		if (result == PGRES_POLLING_OK || result == PGRES_POLLING_FAILED)

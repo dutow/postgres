@@ -30,15 +30,25 @@ override CFLAGS += $(PTHREAD_CFLAGS)
 OBJS = \
 	$(WIN32RES)
 
-OBJS_STATIC = oauth-curl.o
+OBJS_STATIC = \
+	oauth-curl.o \
+	fe-auth-oauth-debug.o
 
 # The shared library needs additional glue symbols.
 OBJS_SHLIB = \
 	oauth-curl_shlib.o \
 	oauth-utils.o \
+	fe-auth-oauth-debug_shlib.o
 
 oauth-utils.o: override CPPFLAGS += -DUSE_DYNAMIC_OAUTH
 oauth-curl_shlib.o: override CPPFLAGS_SHLIB += -DUSE_DYNAMIC_OAUTH
+fe-auth-oauth-debug_shlib.o: override CPPFLAGS_SHLIB += -DUSE_DYNAMIC_OAUTH
+
+fe-auth-oauth-debug.o: $(libpq_srcdir)/fe-auth-oauth-debug.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+fe-auth-oauth-debug_shlib.o: $(libpq_srcdir)/fe-auth-oauth-debug.c
+	$(CC) $(CFLAGS) $(CFLAGS_SL) $(CPPFLAGS) $(CPPFLAGS_SHLIB) -c $< -o $@
 
 # Add shlib-/stlib-specific objects.
 $(shlib): override OBJS += $(OBJS_SHLIB)

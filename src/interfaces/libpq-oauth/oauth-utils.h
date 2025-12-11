@@ -76,7 +76,7 @@ typedef enum
 } PGTernaryBool;
 
 extern void libpq_append_conn_error(PGconn *conn, const char *fmt,...) pg_attribute_printf(2, 3);
-extern bool oauth_unsafe_debugging_enabled(void);
+extern oauth_debug_flags oauth_get_debug_flags(void);
 extern int	pq_block_sigpipe(sigset_t *osigset, bool *sigpipe_pending);
 extern void pq_reset_sigpipe(sigset_t *osigset, bool sigpipe_pending, bool got_epipe);
 
