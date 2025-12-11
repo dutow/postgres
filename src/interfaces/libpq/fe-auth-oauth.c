@@ -383,7 +383,7 @@ issuer_from_well_known_uri(PGconn *conn, const char *wkuri)
 		authority_start = wkuri + strlen(HTTPS_SCHEME);
 
 	if (!authority_start
-		&& oauth_unsafe_debugging_enabled()
+		&& oauth_get_debug_flags().http
 		&& pg_strncasecmp(wkuri, HTTP_SCHEME, strlen(HTTP_SCHEME)) == 0)
 	{
 		/* Allow http:// for testing only. */
@@ -877,7 +877,7 @@ use_builtin_flow(PGconn *conn, fe_oauth_state *state)
 		 *
 		 * Note that POSIX dlerror() isn't guaranteed to be threadsafe.
 		 */
-		if (oauth_unsafe_debugging_enabled())
+		if (oauth_get_debug_flags().print_plugin_errors)
 			fprintf(stderr, "failed dlopen for libpq-oauth: %s\n", dlerror());
 
 		return false;
@@ -891,7 +891,7 @@ use_builtin_flow(PGconn *conn, fe_oauth_state *state)
 		 * This is more of an error condition than the one above, but due to
 		 * the dlerror() threadsafety issue, lock it behind PGOAUTHDEBUG too.
 		 */
-		if (oauth_unsafe_debugging_enabled())
+		if (oauth_get_debug_flags().print_plugin_errors)
 			fprintf(stderr, "failed dlsym for libpq-oauth: %s\n", dlerror());
 
 		dlclose(state->builtin_flow);
@@ -1392,13 +1392,3 @@ pqClearOAuthToken(PGconn *conn)
 	conn->oauth_token = NULL;
 }
 
-/*
- * Returns true if the PGOAUTHDEBUG=UNSAFE flag is set in the environment.
- */
-bool
-oauth_unsafe_debugging_enabled(void)
-{
-	const char *env = getenv("PGOAUTHDEBUG");
-
-	return (env && strcmp(env, "UNSAFE") == 0);
-}

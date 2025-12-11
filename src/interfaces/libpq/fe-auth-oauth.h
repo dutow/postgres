@@ -42,8 +42,25 @@ typedef struct
 	void	   *builtin_flow;
 } fe_oauth_state;
 
+/*
+ * Debug flags for PGOAUTHDEBUG environment variable.
+ * Each flag controls a specific debug feature.
+ */
+typedef struct oauth_debug_flags
+{
+	/* UNSAFE features - require UNSAFE: prefix */
+	bool		http;			/* allow HTTP (unencrypted) connections */
+	bool		trace;			/* log HTTP traffic (exposes secrets) */
+	bool		custom_ca;		/* allow custom CA certificate file */
+
+	/* SAFE features - allowed without UNSAFE: prefix */
+	bool		fast_retry;		/* allow zero-second retry intervals */
+	bool		poll_counts;	/* print poll() statistics */
+	bool		print_plugin_errors;	/* print plugin loading errors */
+} oauth_debug_flags;
+
 extern void pqClearOAuthToken(PGconn *conn);
-extern bool oauth_unsafe_debugging_enabled(void);
+extern oauth_debug_flags oauth_get_debug_flags(void);
 extern bool use_builtin_flow(PGconn *conn, fe_oauth_state *state);
 
 /* Mechanisms in fe-auth-oauth.c */

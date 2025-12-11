@@ -44,7 +44,8 @@ OBJS = \
 	legacy-pqsignal.o \
 	libpq-events.o \
 	pqexpbuffer.o \
-	fe-auth.o
+	fe-auth.o \
+	fe-auth-oauth-debug.o
 
 # File shared across all SSL implementations supported.
 ifneq ($(with_ssl),no)

@@ -89,7 +89,13 @@ init_test_actx(void)
 
 	actx->mux = PGINVALID_SOCKET;
 	actx->timerfd = -1;
-	actx->debugging = true;
+	actx->debug_flags.http = true;
+	actx->debug_flags.trace = true;
+	actx->debug_flags.custom_ca = true;
+	actx->debug_flags.issuer_mismatch = true;
+	actx->debug_flags.fast_retry = true;
+	actx->debug_flags.poll_counts = true;
+	actx->debug_flags.print_plugin_errors = true;
 
 	initPQExpBuffer(&actx->errbuf);
 

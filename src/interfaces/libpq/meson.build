@@ -2,6 +2,7 @@
 
 libpq_sources = files(
   'fe-auth-oauth.c',
+  'fe-auth-oauth-debug.c',
   'fe-auth-scram.c',
   'fe-auth.c',
   'fe-cancel.c',

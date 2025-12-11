@@ -6,6 +6,7 @@ endif
 
 libpq_oauth_sources = files(
   'oauth-curl.c',
+  '../libpq/fe-auth-oauth-debug.c',
 )
 
 # The shared library needs additional glue symbols.
@@ -50,7 +51,10 @@ libpq_oauth_so = shared_module(libpq_oauth_name,
 
 libpq_oauth_test_deps = []
 
-oauth_test_sources = files('test-oauth-curl.c') + libpq_oauth_so_sources
+oauth_test_sources = files(
+  'test-oauth-curl.c',
+  '../libpq/fe-auth-oauth-debug.c',
+) + libpq_oauth_so_sources
 
 if host_system == 'windows'
   oauth_test_sources += rc_bin_gen.process(win32ver_rc, extra_args: [

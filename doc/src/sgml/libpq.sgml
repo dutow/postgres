@@ -10508,41 +10508,123 @@ typedef struct PGoauthBearerRequest
    <title>Debugging and Developer Settings</title>
 
    <para>
-    A "dangerous debugging mode" may be enabled by setting the environment
-    variable <envar>PGOAUTHDEBUG=UNSAFE</envar>. This functionality is provided
-    for ease of local development and testing only. It does several things that
-    you will not want a production system to do:
+    Debug features may be enabled by setting the <envar>PGOAUTHDEBUG</envar>
+    environment variable. This functionality is provided for ease of local
+    development and testing. The variable accepts a comma-separated list of
+    debug options:
 
-    <itemizedlist spacing="compact">
-     <listitem>
-      <para>
-       permits the use of unencrypted HTTP during the OAuth provider exchange
-      </para>
-     </listitem>
-     <listitem>
-      <para>
-       allows the system's trusted CA list to be completely replaced using the
-       <envar>PGOAUTHCAFILE</envar> environment variable
-      </para>
-     </listitem>
-     <listitem>
-      <para>
-       prints HTTP traffic (containing several critical secrets) to standard
-       error during the OAuth flow
-      </para>
-     </listitem>
-     <listitem>
-      <para>
-       permits the use of zero-second retry intervals, which can cause the
-       client to busy-loop and pointlessly consume CPU
-      </para>
-     </listitem>
-    </itemizedlist>
+    <programlisting>
+PGOAUTHDEBUG=option1,option2,...    <lineannotation>for safe options only</lineannotation>
+PGOAUTHDEBUG=UNSAFE:option1,option2,...    <lineannotation>when using unsafe options</lineannotation>
+PGOAUTHDEBUG=UNSAFE    <lineannotation>legacy format; enables all options</lineannotation>
+    </programlisting>
    </para>
+
+   <para>
+    Available debug options:
+
+    <variablelist>
+     <varlistentry>
+      <term><literal>http</literal> (unsafe)</term>
+      <listitem>
+       <para>
+        Permits the use of unencrypted HTTP during the OAuth provider exchange.
+        This allows OAuth credentials to be transmitted over unencrypted
+        connections, which is extremely dangerous and should only be used for
+        local testing.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><literal>trace</literal> (unsafe)</term>
+      <listitem>
+       <para>
+        Prints HTTP traffic to standard error during the OAuth flow. This output
+        contains critical secrets including bearer tokens, client secrets, access
+        tokens, and authorization codes. Never share this output with third
+        parties.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><literal>custom-ca</literal> (unsafe)</term>
+      <listitem>
+       <para>
+        Allows the system's trusted CA list to be completely replaced using the
+        <envar>PGOAUTHCAFILE</envar> environment variable. This can facilitate
+        man-in-the-middle attacks when testing with self-signed certificates.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><literal>fast-retry</literal> (safe)</term>
+      <listitem>
+       <para>
+        Permits the use of zero-second retry intervals instead of the normal
+        minimum of one second. This can speed up tests but may cause the client
+        to busy-loop and consume CPU unnecessarily.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><literal>poll-counts</literal> (safe)</term>
+      <listitem>
+       <para>
+        Prints the total number of poll() calls to standard error when the
+        OAuth flow completes. This helps developers debug the async multiplexer
+        behavior.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><literal>print-plugin-errors</literal> (safe)</term>
+      <listitem>
+       <para>
+        Prints plugin loading errors to standard error. This helps developers
+        and package maintainers debug issues when the OAuth plugin fails to load.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </para>
+
+   <para>
+    Unsafe options (<literal>http</literal>, <literal>trace</literal>,
+    <literal>custom-ca</literal>) require the <literal>UNSAFE:</literal> prefix.
+    If unsafe options are specified without this prefix, a warning is printed
+    to standard error and that option is ignored. Other valid options in the
+    list continue to work. Safe options (<literal>fast-retry</literal>,
+    <literal>poll-counts</literal>, <literal>print-plugin-errors</literal>) can
+    be used without the prefix.
+   </para>
+
+   <para>
+    Unrecognized option names will also trigger a warning and be ignored, while
+    valid options continue to work. This helps catch typos in the environment
+    variable configuration without breaking the debugging of valid options.
+   </para>
+
+   <para>
+    Examples:
+    <programlisting>
+PGOAUTHDEBUG=fast-retry,poll-counts    <lineannotation>safe options only</lineannotation>
+PGOAUTHDEBUG=UNSAFE:http,trace    <lineannotation>enable HTTP and traffic logging</lineannotation>
+PGOAUTHDEBUG=UNSAFE:http,custom-ca,poll-counts    <lineannotation>mix of unsafe and safe</lineannotation>
+PGOAUTHDEBUG=UNSAFE    <lineannotation>legacy; enables all options</lineannotation>
+    </programlisting>
+   </para>
+
    <warning>
     <para>
-     Do not share the output of the OAuth flow traffic with third parties. It
-     contains secrets that can be used to attack your clients and servers.
+     Never use unsafe debug options in production environments. The
+     <literal>trace</literal> option in particular exposes secrets that can be
+     used to attack your clients and servers. Do not share the output with third
+     parties.
     </para>
    </warning>
   </sect2>
