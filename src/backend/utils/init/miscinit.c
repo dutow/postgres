@@ -1786,6 +1786,10 @@ char	   *local_preload_libraries_string = NULL;
 bool		process_shared_preload_libraries_in_progress = false;
 bool		process_shared_preload_libraries_done = false;
 
+/* Flag telling that we are loading session_preload_libraries */
+bool		process_session_preload_libraries_in_progress = false;
+bool		process_session_preload_libraries_done = false;
+
 shmem_request_hook_type shmem_request_hook = NULL;
 bool		process_shmem_requests_in_progress = false;
 
@@ -1864,9 +1868,12 @@ process_shared_preload_libraries(void)
 void
 process_session_preload_libraries(void)
 {
+	process_session_preload_libraries_in_progress = true;
 	load_libraries(session_preload_libraries_string,
 				   "session_preload_libraries",
 				   false);
+	process_session_preload_libraries_in_progress = false;
+	process_session_preload_libraries_done = true;
 	load_libraries(local_preload_libraries_string,
 				   "local_preload_libraries",
 				   true);
