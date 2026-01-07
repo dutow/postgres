@@ -1,0 +1,5 @@
+# test_hba_guc extension
+comment = 'Test module for PGC_HBA GUC variables'
+default_version = '1.0'
+module_pathname = '$libdir/test_hba_guc'
+relocatable = true

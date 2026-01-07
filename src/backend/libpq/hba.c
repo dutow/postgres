@@ -2507,15 +2507,21 @@ parse_hba_auth_opt(char *name, char *val, HbaLine *hbaline,
 	}
 	else
 	{
-		ereport(elevel,
-				(errcode(ERRCODE_CONFIG_FILE_ERROR),
-				 errmsg("unrecognized authentication option name: \"%s\"",
-						name),
-				 errcontext("line %d of configuration file \"%s\"",
-							line_num, file_name)));
-		*err_msg = psprintf("unrecognized authentication option name: \"%s\"",
-							name);
-		return false;
+		/*
+		 * Unrecognized option name - treat it as a potential GUC variable.
+		 * Store the name=value pair in the HbaLine's guc_options list.
+		 * Actual validation (checking if the GUC is defined) happens at
+		 * connection time after session_preload_libraries completes.
+		 */
+		HbaOption  *opt;
+
+		opt = palloc(sizeof(HbaOption));
+		opt->name = pstrdup(name);
+		opt->value = pstrdup(val);
+		hbaline->guc_options = lappend(hbaline->guc_options, opt);
+
+		elog(DEBUG2, "pg_hba.conf line %d: storing GUC option %s = %s",
+			 line_num, name, val);
 	}
 	return true;
 }
@@ -3114,9 +3120,42 @@ load_ident(void)
 
 
 /*
+ * apply_hba_guc_options
+ *		Apply GUC variable settings from the matched HBA line.
+ *
+ * This function processes the guc_options list from the matched pg_hba.conf
+ * line and applies each GUC setting. Variables will either be set (if already
+ * defined) or create placeholders (if not yet defined). Validation of
+ * undefined variables and context checking happens later, after
+ * session_preload_libraries completes in postinit.c.
+ */
+static void
+apply_hba_guc_options(Port *port)
+{
+	ListCell   *lc;
+
+	if (port->hba->guc_options == NIL)
+		return;
+
+	foreach(lc, port->hba->guc_options)
+	{
+		HbaOption  *opt = (HbaOption *) lfirst(lc);
+
+		elog(DEBUG2, "Applying HBA GUC option: %s = %s", opt->name, opt->value);
+
+		(void) set_config_option(opt->name, opt->value,
+								 PGC_HBA, PGC_S_HBA,
+								 GUC_ACTION_SET, true, ERROR, false);
+	}
+}
+
+/*
  *	Determine what authentication method should be used when accessing database
  *	"database" from frontend "raddr", user "user".  Return the method and
  *	an optional argument (stored in fields of *port), and STATUS_OK.
+ *
+ *	Also applies all GUC variables from the matched HBA line, as these variables
+ *	might immediately required by authentication plugins.
  *
  *	If the file does not contain any entry matching the request, we return
  *	method = uaImplicitReject.
@@ -3125,6 +3164,8 @@ void
 hba_getauthmethod(Port *port)
 {
 	check_hba(port);
+
+	apply_hba_guc_options(port);
 }
 
 

@@ -3403,6 +3403,17 @@ set_config_with_handle(const char *name, config_handle *handle,
 			 * signals to individual backends only.
 			 */
 			break;
+		case PGC_HBA:
+			if (context != PGC_SIGHUP && context != PGC_POSTMASTER &&
+				source != PGC_S_HBA)
+			{
+				ereport(elevel,
+						(errcode(ERRCODE_CANT_CHANGE_RUNTIME_PARAM),
+						 errmsg("parameter \"%s\" cannot be changed now",
+								record->name)));
+				return 0;
+			}
+			break;
 		case PGC_SU_BACKEND:
 			if (context == PGC_BACKEND)
 			{
@@ -3456,6 +3467,7 @@ set_config_with_handle(const char *name, config_handle *handle,
 			else if (context != PGC_POSTMASTER &&
 					 context != PGC_BACKEND &&
 					 context != PGC_SU_BACKEND &&
+					 context != PGC_HBA &&
 					 source != PGC_S_CLIENT)
 			{
 				ereport(elevel,
@@ -4164,6 +4176,87 @@ get_config_handle(const char *name)
 	return NULL;
 }
 
+/*
+ * check_hba_guc_variables
+ *
+ * Check if any GUC variables set from pg_hba.conf (source = PGC_S_HBA)
+ * are still placeholders (undefined) or have the wrong context.
+ *
+ * Also enforces strict GUC prefix reservation for PGC_HBA variables:
+ * extensions that define PGC_HBA variables MUST call MarkGUCPrefixReserved()
+ * and their variables MUST be under the reserved prefix. This is always
+ * enforced regardless of the guc_prefix_enforcement setting, because
+ * PGC_HBA variables can affect authentication security.
+ *
+ * For each invalid variable, we emit a FATAL error with an appropriate
+ * message explaining the problem.
+ *
+ * This should be called after session_preload_libraries completes to
+ * ensure extensions have had a chance to define their PGC_HBA variables.
+ */
+void
+check_hba_guc_variables(void)
+{
+	HASH_SEQ_STATUS status;
+	GUCHashEntry *hentry;
+
+	hash_seq_init(&status, guc_hashtab);
+	while ((hentry = (GUCHashEntry *) hash_seq_search(&status)) != NULL)
+	{
+		struct config_generic *gconf = hentry->gucvar;
+
+		if (gconf->source != PGC_S_HBA)
+			continue;
+
+		if (gconf->flags & GUC_CUSTOM_PLACEHOLDER)
+		{
+			ereport(FATAL,
+					(errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+					 errmsg("authentication configuration error"),
+					 errdetail("pg_hba.conf references undefined GUC variable \"%s\"",
+							   gconf->name),
+					 errhint("Ensure the extension defining this variable is loaded in session_preload_libraries or shared_preload_libraries.")));
+		}
+
+		if (gconf->context < PGC_HBA)
+		{
+			ereport(FATAL,
+					(errcode(ERRCODE_CANT_CHANGE_RUNTIME_PARAM),
+					 errmsg("parameter \"%s\" cannot be set in pg_hba.conf",
+							gconf->name),
+					 errdetail("Only variables with context PGC_HBA or below can be set from pg_hba.conf."),
+					 errhint("This variable has context \"%s\".",
+							 GucContext_Names[gconf->context])));
+		}
+
+		if (gconf->library_name != NULL)
+		{
+			ReservedGUCPrefix *reservation;
+
+			reservation = find_reserved_prefix_for_variable(gconf->name);
+
+			if (reservation == NULL)
+			{
+				ereport(FATAL,
+						(errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+						 errmsg("authentication configuration error"),
+						 errdetail("Extension \"%s\" defines PGC_HBA variable \"%s\" without a reserved prefix.",
+								   gconf->library_name, gconf->name),
+						 errhint("Extensions that define PGC_HBA variables must call MarkGUCPrefixReserved().")));
+			}
+			else if (reservation->library_name != NULL &&
+					 strcmp(reservation->library_name, gconf->library_name) != 0)
+			{
+				ereport(FATAL,
+						(errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+						 errmsg("authentication configuration error"),
+						 errdetail("Extension \"%s\" defines PGC_HBA variable \"%s\" under prefix reserved by \"%s\".",
+								   gconf->library_name, gconf->name, reservation->library_name)));
+			}
+		}
+	}
+}
+
 
 /*
  * Set the fields for source file and line number the setting came from.
@@ -4764,6 +4857,19 @@ init_custom_variable(const char *name,
 	if (context == PGC_POSTMASTER &&
 		!process_shared_preload_libraries_in_progress)
 		elog(FATAL, "cannot create PGC_POSTMASTER variables after startup");
+
+	/*
+	 * Only allow custom PGC_HBA variables to be created before
+	 * session_preload_libraries completes. After that point, authentication
+	 * has already occurred and check_hba_guc_variables has validated all
+	 * PGC_HBA variables, so defining new ones would bypass validation.
+	 */
+	if (context == PGC_HBA && process_session_preload_libraries_done)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("PGC_HBA variables must be defined before session_preload_libraries completes"),
+				 errdetail("Attempted to define \"%s\" after session preload", name),
+				 errhint("Move the extension defining this variable to shared_preload_libraries or session_preload_libraries")));
 
 	/*
 	 * We can't support custom GUC_LIST_QUOTE variables, because the wrong
@@ -6758,6 +6864,15 @@ validate_option_array_item(const char *name, const char *value,
 			 (superuser() ||
 			  pg_parameter_aclcheck(name, GetUserId(), ACL_SET) == ACLCHECK_OK))
 		 /* ok */ ;
+	else if (gconf->context == PGC_HBA)
+	{
+		if (skipIfNoPermissions)
+			return false;
+		ereport(ERROR,
+				(errcode(ERRCODE_CANT_CHANGE_RUNTIME_PARAM),
+				 errmsg("parameter \"%s\" cannot be set by ALTER USER or ALTER DATABASE", name),
+				 errhint("Use postgresql.conf, ALTER SYSTEM, or pg_hba.conf to set this parameter.")));
+	}
 	else if (skipIfNoPermissions)
 		return false;
 	/* if a permissions error should be thrown, let set_config_option do it */

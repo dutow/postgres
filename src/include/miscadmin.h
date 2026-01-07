@@ -512,6 +512,8 @@ extern void BaseInit(void);
 extern PGDLLIMPORT bool IgnoreSystemIndexes;
 extern PGDLLIMPORT bool process_shared_preload_libraries_in_progress;
 extern PGDLLIMPORT bool process_shared_preload_libraries_done;
+extern PGDLLIMPORT bool process_session_preload_libraries_in_progress;
+extern PGDLLIMPORT bool process_session_preload_libraries_done;
 extern PGDLLIMPORT bool process_shmem_requests_in_progress;
 extern PGDLLIMPORT char *session_preload_libraries_string;
 extern PGDLLIMPORT char *shared_preload_libraries_string;

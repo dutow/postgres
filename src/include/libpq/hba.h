@@ -92,6 +92,12 @@ typedef struct AuthToken
 	regex_t    *regex;
 } AuthToken;
 
+typedef struct HbaOption
+{
+	char	   *name;
+	char	   *value;
+} HbaOption;
+
 typedef struct HbaLine
 {
 	char	   *sourcefile;
@@ -140,6 +146,7 @@ typedef struct HbaLine
 	char	   *oauth_scope;
 	char	   *oauth_validator;
 	bool		oauth_skip_usermap;
+	List	   *guc_options;
 } HbaLine;
 
 typedef struct IdentLine

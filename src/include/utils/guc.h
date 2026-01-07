@@ -73,6 +73,7 @@ typedef enum
 	PGC_INTERNAL,
 	PGC_POSTMASTER,
 	PGC_SIGHUP,
+	PGC_HBA,
 	PGC_SU_BACKEND,
 	PGC_BACKEND,
 	PGC_SUSET,
@@ -115,6 +116,7 @@ typedef enum
 	PGC_S_ENV_VAR,				/* postmaster environment variable */
 	PGC_S_FILE,					/* postgresql.conf */
 	PGC_S_ARGV,					/* postmaster command line */
+	PGC_S_HBA,					/* from pg_hba.conf */
 	PGC_S_GLOBAL,				/* global in-database setting */
 	PGC_S_DATABASE,				/* per-database setting */
 	PGC_S_USER,					/* per-user setting */
@@ -473,6 +475,7 @@ extern int	set_config_with_handle(const char *name, config_handle *handle,
 								   int elevel, bool is_reload);
 extern config_handle *get_config_handle(const char *name);
 extern void check_guc_prefix_reservations(void);
+extern void check_hba_guc_variables(void);
 extern void AlterSystemSetConfigFile(AlterSystemStmt *altersysstmt);
 extern char *GetConfigOptionByName(const char *name, const char **varname,
 								   bool missing_ok);

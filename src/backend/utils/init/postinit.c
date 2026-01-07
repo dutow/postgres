@@ -33,6 +33,7 @@
 #include "catalog/pg_database.h"
 #include "catalog/pg_db_role_setting.h"
 #include "catalog/pg_tablespace.h"
+#include "lib/stringinfo.h"
 #include "libpq/auth.h"
 #include "libpq/libpq-be.h"
 #include "mb/pg_wchar.h"
@@ -1224,6 +1225,13 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	 */
 	if ((flags & INIT_PG_LOAD_SESSION_LIBS) != 0)
 		process_session_preload_libraries();
+
+	/*
+	 * Now that session_preload_libraries has completed, validate that all
+	 * GUC variables set from pg_hba.conf are properly defined with the
+	 * correct context.
+	 */
+	check_hba_guc_variables();
 
 	/* fill in the remainder of this entry in the PgBackendStatus array */
 	if (!bootstrap)
