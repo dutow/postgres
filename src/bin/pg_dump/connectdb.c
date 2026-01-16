@@ -19,6 +19,7 @@
 #include "common/string.h"
 #include "connectdb.h"
 #include "dumputils.h"
+#include "fe_utils/oauth_utils.h"
 #include "fe_utils/string_utils.h"
 
 static char *constructConnStr(const char **keywords, const char **values);
@@ -51,6 +52,8 @@ ConnectDatabase(const char *dbname, const char *connection_string,
 	const char **values = NULL;
 	PQconninfoOption *conn_opts = NULL;
 	int			server_version_temp;
+
+	pg_setup_oauth_hook();
 
 	if (prompt_password == TRI_YES && !password)
 		password = simple_prompt("Password: ", false);

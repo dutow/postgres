@@ -15,6 +15,7 @@
 #include "common/logging.h"
 #include "common/string.h"
 #include "fe_utils/connect_utils.h"
+#include "fe_utils/oauth_utils.h"
 #include "fe_utils/query_utils.h"
 
 /*
@@ -35,6 +36,8 @@ connectDatabase(const ConnParams *cparams, const char *progname,
 	PGconn	   *conn;
 	bool		new_pass;
 	static char *password = NULL;
+
+	pg_setup_oauth_hook();
 
 	/* Callers must supply at least dbname; other params can be NULL */
 	Assert(cparams->dbname);

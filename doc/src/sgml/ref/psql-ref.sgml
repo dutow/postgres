@@ -5276,6 +5276,34 @@ $endif
     </listitem>
    </varlistentry>
 
+   <varlistentry id="app-psql-environment-pgoauthtoken">
+    <term><envar>PGOAUTHTOKEN</envar></term>
+
+    <listitem>
+     <para>
+      OAuth bearer token to use for authentication when connecting to
+      the server. When this environment variable is set and the server
+      requests OAuth authentication, <application>psql</application> and
+      other PostgreSQL command-line tools will provide this token directly
+      instead of performing the interactive device authorization flow.
+     </para>
+     <para>
+      This is useful when the OAuth token has been obtained through
+      external means (e.g., in CI/CD pipelines or when using OAuth
+      providers like GitHub that don't support device flow). The token
+      should be valid for the target PostgreSQL server's configured
+      OAuth issuer.
+     </para>
+     <para>
+      Note: This environment variable is specific to PostgreSQL
+      command-line tools (such as <application>psql</application>,
+      <application>createdb</application>, <application>pg_dump</application>, etc.)
+      and does not affect other applications using libpq.
+      For security, avoid logging or displaying the token value in scripts.
+     </para>
+    </listitem>
+   </varlistentry>
+
    <varlistentry id="app-psql-environment-pg-color">
     <term><envar>PG_COLOR</envar></term>
     <listitem>

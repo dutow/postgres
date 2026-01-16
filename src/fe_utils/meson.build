@@ -11,6 +11,7 @@ fe_utils_sources = files(
   'conditional.c',
   'connect_utils.c',
   'mbprint.c',
+  'oauth_utils.c',
   'option_utils.c',
   'parallel_slot.c',
   'print.c',

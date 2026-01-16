@@ -30,6 +30,7 @@ OBJS = \
 	conditional.o \
 	connect_utils.o \
 	mbprint.o \
+	oauth_utils.o \
 	option_utils.o \
 	parallel_slot.o \
 	print.o \

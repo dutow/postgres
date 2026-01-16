@@ -19,6 +19,7 @@
 #include "common/logging.h"
 #include "common/string.h"
 #include "describe.h"
+#include "fe_utils/oauth_utils.h"
 #include "fe_utils/print.h"
 #include "getopt_long.h"
 #include "help.h"
@@ -134,6 +135,8 @@ main(int argc, char *argv[])
 	pg_logging_set_pre_callback(log_pre_callback);
 	pg_logging_set_locus_callback(log_locus_callback);
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("psql"));
+
+	pg_setup_oauth_hook();
 
 	if (argc > 1)
 	{

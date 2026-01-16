@@ -23,6 +23,7 @@
 #include "common/logging.h"
 #include "common/string.h"
 #include "datatype/timestamp.h"
+#include "fe_utils/oauth_utils.h"
 #include "port/pg_bswap.h"
 #include "pqexpbuffer.h"
 #include "streamutil.h"
@@ -70,6 +71,8 @@ GetConnection(void)
 	PQconninfoOption *conn_opts = NULL;
 	PQconninfoOption *conn_opt;
 	char	   *err_msg = NULL;
+
+	pg_setup_oauth_hook();
 
 	/*
 	 * pg_recvlogical uses dbname only; others use connection_string only.

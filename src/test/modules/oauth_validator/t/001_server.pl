@@ -217,6 +217,32 @@ $node->connect_ok(
 	expected_stderr =>
 	  qr@Visit https://example\.com/ and enter the code: postgresuser@);
 
+# Test PGOAUTHTOKEN environment variable support
+$ENV{PGOAUTHTOKEN} = "test-token-from-env-12345";
+$log_start = $node->wait_for_log(qr/connection authorized/, $log_start);
+
+$node->connect_ok(
+	"user=$user dbname=postgres oauth_issuer=$issuer oauth_client_id=f02c6361-0635",
+	"connect with PGOAUTHTOKEN environment variable",
+	log_like => [
+		qr/oauth_validator: token="test-token-from-env-12345", role="$user"/,
+		qr/oauth_validator: issuer="\Q$issuer\E", scope="openid postgres"/,
+		qr/connection authenticated: identity="test" method=oauth/,
+		qr/connection authorized/,
+	]);
+
+$ENV{PGOAUTHTOKEN} = "";
+$node->connect_ok(
+	"user=$user dbname=postgres oauth_issuer=$issuer oauth_client_id=f02c6361-0635",
+	"empty PGOAUTHTOKEN falls back to device flow",
+	expected_stderr =>
+	  qr@Visit https://example\.com/ and enter the code: postgresuser@,
+	log_like => [
+		qr/oauth_validator: token="9243959234", role="$user"/,
+	]);
+
+delete $ENV{PGOAUTHTOKEN};
+
 #
 # Further tests rely on support for specific behaviors in oauth_server.py. To
 # trigger these behaviors, we ask for the special issuer .../param (which is set
