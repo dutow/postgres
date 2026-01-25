@@ -985,7 +985,8 @@ index_create(Relation heapRelation,
 								allow_system_table_mods,
 								&relfrozenxid,
 								&relminmxid,
-								create_storage);
+								create_storage,
+								NULL);
 
 	Assert(relfrozenxid == InvalidTransactionId);
 	Assert(relminmxid == InvalidMultiXactId);
