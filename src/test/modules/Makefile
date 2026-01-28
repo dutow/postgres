@@ -29,6 +29,9 @@ SUBDIRS = \
 		  test_escape \
 		  test_extensions \
 		  test_ginpostinglist \
+		  test_guc_prefix_enforcement \
+		  test_hba_guc \
+		  test_hba_guc_contexts \
 		  test_int128 \
 		  test_integerset \
 		  test_json_parser \
