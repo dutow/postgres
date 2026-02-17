@@ -153,8 +153,6 @@ pgxs_bins = {
 }
 
 pgxs_empty = [
-  'ICU_CFLAGS', # needs to be added, included by public server headers
-
   # hard to see why we'd need these ones?
   'ZIC',
   'TCLSH',
@@ -183,14 +181,14 @@ pgxs_empty = [
   'PG_TEST_EXTRA',
   'DTRACEFLAGS', # only server has dtrace probes
 
-  'perl_archlibexp', 'perl_embed_ccflags', 'perl_embed_ldflags', 'perl_includespec', 'perl_privlibexp',
-  'python_additional_libs', 'python_includespec', 'python_libdir', 'python_libspec', 'python_majorversion', 'python_version',
+  'perl_archlibexp', 'perl_embed_ccflags', 'perl_embed_ldflags', 'perl_privlibexp',
+  'python_additional_libs', 'python_libdir', 'python_libspec', 'python_majorversion', 'python_version',
 
   # possible that some of these are referenced explicitly in pgxs makefiles?
   # For now not worth it.
   'TCL_INCLUDE_SPEC', 'TCL_LIBS', 'TCL_LIB_SPEC', 'TCL_SHARED_BUILD',
 
-  'LLVM_CFLAGS', 'LLVM_CPPFLAGS', 'LLVM_CXXFLAGS', 'LLVM_LIBS',
+  'LLVM_CFLAGS', 'LLVM_CXXFLAGS', 'LLVM_LIBS',
 
   'LDAP_LIBS_BE', 'LDAP_LIBS_FE',
 
@@ -272,3 +270,44 @@ endforeach
 foreach d, v : pgxs_deps
   pgxs_cdata.set('with_@0@'.format(d), v.found() ? 'yes' : 'no')
 endforeach
+
+# These variables are not needed by PGXS itself, but are used by the
+# headerscheck script (src/tools/pginclude/headerscheck) which reads
+# Makefile.global to obtain compiler flags for checking header
+# standalone compilability.
+
+_icu_cflags = ''
+if icu.found()
+  _pkgconf = find_program('pkg-config', required: false)
+  if _pkgconf.found()
+    _r = run_command(_pkgconf, '--cflags', 'icu-uc', check: false)
+    if _r.returncode() == 0
+      _icu_cflags = _r.stdout().strip()
+    endif
+  endif
+endif
+pgxs_cdata.set('ICU_CFLAGS', _icu_cflags)
+
+_llvm_cppflags = ''
+if llvm.found()
+  _llvm_cppflags = llvm.get_variable(configtool: 'cppflags',
+                                     default_value: '')
+endif
+pgxs_cdata.set('LLVM_CPPFLAGS', _llvm_cppflags)
+
+_perl_includespec = ''
+if perl_dep.found()
+  _perl_includespec = ' '.join(perl_ccflags)
+endif
+pgxs_cdata.set('perl_includespec', _perl_includespec)
+
+_python_includespec = ''
+if python3_dep.found()
+  _r = run_command(python, '-c',
+    'import sysconfig; print("-I" + sysconfig.get_path("include"))',
+    check: false)
+  if _r.returncode() == 0
+    _python_includespec = _r.stdout().strip()
+  endif
+endif
+pgxs_cdata.set('python_includespec', _python_includespec)
