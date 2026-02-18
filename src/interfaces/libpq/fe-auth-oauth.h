@@ -52,6 +52,7 @@ typedef struct oauth_debug_flags
 	bool		http;			/* allow HTTP (unencrypted) connections */
 	bool		trace;			/* log HTTP traffic (exposes secrets) */
 	bool		custom_ca;		/* allow custom CA certificate file */
+	bool		issuer_mismatch;	/* tolerate issuer mismatch */
 
 	/* SAFE features - allowed without UNSAFE: prefix */
 	bool		fast_retry;		/* allow zero-second retry intervals */

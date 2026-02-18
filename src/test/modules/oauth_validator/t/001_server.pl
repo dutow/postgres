@@ -136,12 +136,15 @@ $node->connect_ok(
 	]);
 
 # The issuer linked by the server must match the client's oauth_issuer setting.
-$node->connect_fails(
-	"user=$user dbname=postgres oauth_issuer=$issuer oauth_client_id=f02c6361-0636",
-	"oauth_issuer must match discovery",
-	expected_stderr =>
-	  qr@server's discovery document at \Q$issuer/.well-known/oauth-authorization-server/alternate\E \(issuer "\Q$issuer/alternate\E"\) is incompatible with oauth_issuer \(\Q$issuer\E\)@
-);
+{
+	local $ENV{PGOAUTHDEBUG} = "UNSAFE:http";
+	$node->connect_fails(
+		"user=$user dbname=postgres oauth_issuer=$issuer oauth_client_id=f02c6361-0636",
+		"oauth_issuer must match discovery",
+		expected_stderr =>
+		  qr@server's discovery document at \Q$issuer/.well-known/oauth-authorization-server/alternate\E \(issuer "\Q$issuer/alternate\E"\) is incompatible with oauth_issuer \(\Q$issuer\E\)@
+	);
+}
 
 # Test require_auth settings against OAUTHBEARER.
 my @cases = (

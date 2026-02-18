@@ -2223,10 +2223,15 @@ check_issuer(struct async_ctx *actx, PGconn *conn)
 	 */
 	if (strcmp(oauth_issuer_id, provider->issuer) != 0)
 	{
-		actx_error(actx,
-				   "the issuer identifier (%s) does not match oauth_issuer (%s)",
-				   provider->issuer, oauth_issuer_id);
-		return false;
+		if (!actx->debug_flags.issuer_mismatch)
+		{
+			actx_error(actx,
+					   "the issuer identifier (%s) does not match oauth_issuer (%s)",
+					   provider->issuer, oauth_issuer_id);
+			return false;
+		}
+
+		return true;
 	}
 
 	return true;

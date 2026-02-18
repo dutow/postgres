@@ -53,6 +53,12 @@ parse_debug_option(const char *option, oauth_debug_flags *flags, bool *is_unsafe
 		*is_unsafe = true;
 		return true;
 	}
+	else if (strcmp(option, "issuer-mismatch") == 0)
+	{
+		flags->issuer_mismatch = true;
+		*is_unsafe = true;
+		return true;
+	}
 	/* Safe options */
 	else if (strcmp(option, "fast-retry") == 0)
 	{
@@ -103,6 +109,7 @@ oauth_get_debug_flags(void)
 		flags.http = true;
 		flags.trace = true;
 		flags.custom_ca = true;
+		flags.issuer_mismatch = true;
 		flags.fast_retry = true;
 		flags.poll_counts = true;
 		flags.print_plugin_errors = true;

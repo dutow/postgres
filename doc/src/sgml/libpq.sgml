@@ -10560,6 +10560,20 @@ PGOAUTHDEBUG=UNSAFE    <lineannotation>legacy format; enables all options</linea
      </varlistentry>
 
      <varlistentry>
+      <term><literal>issuer-mismatch</literal> (unsafe)</term>
+      <listitem>
+       <para>
+        Tolerates a mismatch between the client's configured
+        <literal>oauth_issuer</literal> and the issuer found in the server's
+        discovery document. This disables the mix-up attack protection from
+        RFC 9207 and should only be used in development or testing environments
+        where the server's issuer identifier does not match the client
+        configuration.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
       <term><literal>fast-retry</literal> (safe)</term>
       <listitem>
        <para>
@@ -10595,7 +10609,7 @@ PGOAUTHDEBUG=UNSAFE    <lineannotation>legacy format; enables all options</linea
 
    <para>
     Unsafe options (<literal>http</literal>, <literal>trace</literal>,
-    <literal>custom-ca</literal>) require the <literal>UNSAFE:</literal> prefix.
+    <literal>custom-ca</literal>, <literal>issuer-mismatch</literal>) require the <literal>UNSAFE:</literal> prefix.
     If unsafe options are specified without this prefix, a warning is printed
     to standard error and that option is ignored. Other valid options in the
     list continue to work. Safe options (<literal>fast-retry</literal>,

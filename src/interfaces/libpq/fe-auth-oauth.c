@@ -606,13 +606,16 @@ handle_oauth_sasl_error(PGconn *conn, const char *msg, int msglen)
 
 		if (strcmp(conn->oauth_issuer_id, discovery_issuer) != 0)
 		{
-			libpq_append_conn_error(conn,
-									"server's discovery document at %s (issuer \"%s\") is incompatible with oauth_issuer (%s)",
-									ctx.discovery_uri, discovery_issuer,
-									conn->oauth_issuer_id);
+			if (!oauth_get_debug_flags().issuer_mismatch)
+			{
+				libpq_append_conn_error(conn,
+										"server's discovery document at %s (issuer \"%s\") is incompatible with oauth_issuer (%s)",
+										ctx.discovery_uri, discovery_issuer,
+										conn->oauth_issuer_id);
 
-			free(discovery_issuer);
-			goto cleanup;
+				free(discovery_issuer);
+				goto cleanup;
+			}
 		}
 
 		free(discovery_issuer);
@@ -625,7 +628,8 @@ handle_oauth_sasl_error(PGconn *conn, const char *msg, int msglen)
 		else
 		{
 			/* This must match the URI we'd previously determined. */
-			if (strcmp(conn->oauth_discovery_uri, ctx.discovery_uri) != 0)
+			if (strcmp(conn->oauth_discovery_uri, ctx.discovery_uri) != 0
+				&& !oauth_get_debug_flags().issuer_mismatch)
 			{
 				libpq_append_conn_error(conn,
 										"server's discovery document has moved to %s (previous location was %s)",
