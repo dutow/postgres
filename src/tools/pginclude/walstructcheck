@@ -1,0 +1,226 @@
+#!/bin/sh
+
+# Check WAL record struct headers for padding.
+#
+# Compiles each WAL-related header with -Wpadded and reports any
+# padding warnings originating from that header.  Warnings from
+# transitive includes (system headers, other PG headers) are filtered out.
+#
+# Arguments: srcdir builddir (default to ".")
+# Needs a configured build tree with src/Makefile.global.
+#
+# src/tools/pginclude/walstructcheck
+# Copyright (c) 2026, PostgreSQL Global Development Group
+
+if [ -z "$1" ]; then
+    srcdir="."
+else
+    srcdir="$1"
+fi
+
+if [ -z "$2" ]; then
+    builddir="."
+else
+    builddir="$2"
+fi
+
+me=`basename $0`
+
+WAL_HEADERS="
+src/include/access/heapam_xlog.h
+src/include/access/hash_xlog.h
+src/include/access/nbtxlog.h
+src/include/access/xact.h
+src/include/access/brin_xlog.h
+src/include/access/ginxlog.h
+src/include/access/spgxlog.h
+src/include/access/gistxlog.h
+src/include/access/xlogrecord.h
+src/include/access/multixact.h
+src/include/access/clog.h
+src/include/access/commit_ts.h
+src/include/catalog/storage_xlog.h
+src/include/commands/dbcommands_xlog.h
+src/include/commands/sequence_xlog.h
+src/include/commands/tablespace.h
+src/include/replication/message.h
+src/include/replication/origin.h
+src/include/storage/standbydefs.h
+"
+
+# Structs with documented intentional padding that should not be reported.
+# XLogRecord: "2 bytes of padding here, initialize to zero" (xlogrecord.h:48)
+# xlhp_freeze_plan: "2 bytes of padding" between frzflags and ntuples (heapam_xlog.h:259)
+# TODO: is this a good idea? We can't verify zero initialization
+#
+# Non-WAL structs that happen to live in WAL-related headers.
+# TableSpaceOpts: tablespace reloptions, not serialized to WAL
+# SavedTransactionCharacteristics: runtime transaction state, not WAL
+# ReplOriginXactState: runtime replication origin state, not WAL
+ALLOWLIST="
+XLogRecord
+xlhp_freeze_plan
+TableSpaceOpts
+SavedTransactionCharacteristics
+ReplOriginXactState
+"
+
+# Pull compiler info from configure's results.
+MGLOB="$builddir/src/Makefile.global"
+if [ ! -f "$MGLOB" ]; then
+    echo "$me: could not find $MGLOB" >&2
+    echo "$me: you need to run this from a configured build" >&2
+    exit 2
+fi
+
+CPPFLAGS=`sed -n 's/^CPPFLAGS[ 	]*=[ 	]*//p' "$MGLOB"`
+CFLAGS=`sed -n 's/^CFLAGS[ 	]*=[ 	]*//p' "$MGLOB"`
+CC=`sed -n 's/^CC[ 	]*=[ 	]*//p' "$MGLOB"`
+PG_SYSROOT=`sed -n 's/^PG_SYSROOT[ 	]*=[ 	]*//p' "$MGLOB"`
+
+# needed on Darwin
+CPPFLAGS=`echo "$CPPFLAGS" | sed "s|\\\$(PG_SYSROOT)|$PG_SYSROOT|g"`
+
+COMPILER=${CC:-gcc}
+COMPILER_FLAGS="$CPPFLAGS $CFLAGS"
+
+# Determine the enclosing struct name for a given line number in a header.
+# Searches backward from the target line for 'typedef struct <Name>' or
+# 'struct <Name>' and prints the struct name.
+get_struct_name() {
+    _file=$1
+    _lineno=$2
+    awk -v target="$_lineno" '
+        /typedef struct/ || /^struct [a-zA-Z_]/ {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "struct" && i < NF) {
+                    s = $(i+1)
+                    break
+                }
+            }
+        }
+        NR == target { print s; exit }
+    ' "$_file"
+}
+
+# Check whether a struct name is in the allowlist.
+is_allowlisted() {
+    _name=$1
+    for _a in $ALLOWLIST; do
+        if [ "$_name" = "$_a" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Find a SizeOf or MinSizeOf macro defined shortly after a given line.
+# These macros use offsetof() to compute a size that excludes trailing
+# padding, so trailing padding is acceptable when such a macro exists.
+find_sizeof_macro() {
+    _file=$1
+    _start_line=$2
+    awk -v start="$_start_line" '
+        NR > start && NR <= start + 5 {
+            if ($1 == "#define" && ($2 ~ /^SizeOf/ || $2 ~ /^MinSizeOf/)) {
+                print $2
+                exit
+            }
+        }
+    ' "$_file"
+}
+
+tmp="tmp_${me}"
+mkdir -p "$tmp"
+
+trap "ret=\$?; rm -rf $tmp; exit \$ret" 0 1 2 3 15
+
+exit_status=0
+
+for f in $WAL_HEADERS
+do
+    if [ ! -f "$srcdir/$f" ]; then
+        echo "$me: WARNING: $f not found, skipping" >&2
+        continue
+    fi
+
+    header_basename=`basename "$f"`
+
+    # Create a .c file that includes this header.
+    test_file="$tmp/walcheck_${header_basename%.h}.c"
+    cat > "$test_file" <<EOF
+#include "postgres.h"
+#include "$f"
+EOF
+
+    # Compile with -Wpadded, capturing stderr.
+    errfile="$tmp/walcheck_${header_basename%.h}.err"
+    $COMPILER $COMPILER_FLAGS \
+        -I "$builddir" -I "$srcdir" \
+        -I "$builddir/src/include" -I "$srcdir/src/include" \
+        -I "$builddir/src/interfaces/libpq" -I "$srcdir/src/interfaces/libpq" \
+        -Wpadded -fsyntax-only \
+        $EXTRAFLAGS \
+        "$test_file" 2>"$errfile" || true
+
+    # Filter warnings: keep only lines that reference the WAL header
+    # being tested and mention "padding".
+    grep "$header_basename" "$errfile" | grep -i "padding" > "$tmp/filtered.txt" 2>/dev/null || true
+
+    # Process each warning, looking up the enclosing struct name to
+    # check against the allowlist.  GCC/Clang warnings don't include
+    # the struct name, so we find it from the source file.
+    #
+    # Trailing padding warnings ("padding struct size to alignment
+    # boundary") are acceptable when a SizeOf/MinSizeOf macro exists
+    # that correctly excludes the trailing padding.
+    while IFS= read -r warning_line; do
+        # Extract line number from warning (format: file:line:col: warning: ...)
+        warn_lineno=`echo "$warning_line" | cut -d: -f2`
+
+        struct_name=`get_struct_name "$srcdir/$f" "$warn_lineno"`
+
+        if is_allowlisted "$struct_name"; then
+            continue
+        fi
+
+        # Check if this is trailing padding (vs internal padding).
+        if echo "$warning_line" | grep -q "padding struct size to alignment boundary"; then
+            # Extract the byte count from "with N bytes".
+            pad_bytes=`echo "$warning_line" | sed -n 's/.*with \([0-9][0-9]*\) bytes.*/\1/p'`
+
+            sizeof_macro=`find_sizeof_macro "$srcdir/$f" "$warn_lineno"`
+            if [ -n "$sizeof_macro" ] && [ -n "$pad_bytes" ]; then
+                # Verify the macro excludes exactly the trailing padding.
+                verify_file="$tmp/sizeof_verify.c"
+                cat > "$verify_file" <<VEOF
+#include "postgres.h"
+#include "$f"
+StaticAssertDecl(sizeof($struct_name) - ($sizeof_macro) == $pad_bytes,
+    "SizeOf macro must exclude exactly the trailing padding");
+VEOF
+                if $COMPILER $COMPILER_FLAGS \
+                    -I "$builddir" -I "$srcdir" \
+                    -I "$builddir/src/include" -I "$srcdir/src/include" \
+                    -I "$builddir/src/interfaces/libpq" -I "$srcdir/src/interfaces/libpq" \
+                    -fsyntax-only $EXTRAFLAGS \
+                    "$verify_file" 2>/dev/null; then
+                    # SizeOf macro properly accounts for trailing padding.
+                    rm -f "$verify_file"
+                    continue
+                fi
+                rm -f "$verify_file"
+            fi
+            echo "$warning_line (struct $struct_name, no SizeOf macro)"
+            exit_status=1
+        else
+            # Internal padding: always a problem.
+            echo "$warning_line (struct $struct_name)"
+            exit_status=1
+        fi
+    done < "$tmp/filtered.txt"
+
+    rm -f "$test_file" "$errfile" "$tmp/filtered.txt"
+done
+
+exit $exit_status

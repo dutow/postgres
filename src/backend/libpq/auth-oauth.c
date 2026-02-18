@@ -28,6 +28,7 @@
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "utils/json.h"
+#include "utils/memutils.h"
 #include "utils/varlena.h"
 
 /* GUC */
@@ -39,7 +40,7 @@ static int	oauth_exchange(void *opaq, const char *input, int inputlen,
 						   char **output, int *outputlen, const char **logdetail);
 
 static void load_validator_library(const char *libname);
-static void shutdown_validator_library(void *arg);
+static void shutdown_validator_library(int code, Datum arg);
 
 static ValidatorModuleState *validator_module_state;
 static const OAuthValidatorCallbacks *ValidatorCallbacks;
@@ -641,6 +642,7 @@ validate(Port *port, const char *auth)
 	ValidatorModuleResult *ret;
 	const char *token;
 	bool		status;
+	MemoryContext oldctx;
 
 	/* Ensure that we have a correct token to validate */
 	if (!(token = validate_token_format(auth)))
@@ -655,10 +657,18 @@ validate(Port *port, const char *auth)
 				errcode(ERRCODE_INTERNAL_ERROR),
 				errmsg("validation of OAuth token requested without a validator loaded"));
 
-	/* Call the validation function from the validator module */
 	ret = palloc0_object(ValidatorModuleResult);
-	if (!ValidatorCallbacks->validate_cb(validator_module_state, token,
-										 port->user_name, ret))
+	/*
+	 * Call the validation function from the validator module in
+	 * TopMemoryContext, so that any allocations made by the module persist
+	 * until the shutdown callback runs at backend exit.
+	 */
+	oldctx = MemoryContextSwitchTo(TopMemoryContext);
+	status = ValidatorCallbacks->validate_cb(validator_module_state, token,
+											 port->user_name, ret);
+	MemoryContextSwitchTo(oldctx);
+
+	if (!status)
 	{
 		ereport(WARNING,
 				errcode(ERRCODE_INTERNAL_ERROR),
@@ -738,7 +748,7 @@ static void
 load_validator_library(const char *libname)
 {
 	OAuthValidatorModuleInit validator_init;
-	MemoryContextCallback *mcb;
+	MemoryContext oldctx;
 
 	/*
 	 * The presence, and validity, of libname has already been established by
@@ -784,26 +794,30 @@ load_validator_library(const char *libname)
 				errmsg("%s module \"%s\" must provide a %s callback",
 					   "OAuth validator", libname, "validate_cb"));
 
-	/* Allocate memory for validator library private state data */
+	/*
+	 * Allocate validator state and call startup in TopMemoryContext, so that
+	 * any allocations made by the validator module persist until the
+	 * shutdown callback runs at backend exit.
+	 */
+	oldctx = MemoryContextSwitchTo(TopMemoryContext);
+
 	validator_module_state = palloc0_object(ValidatorModuleState);
 	validator_module_state->sversion = PG_VERSION_NUM;
 
 	if (ValidatorCallbacks->startup_cb != NULL)
 		ValidatorCallbacks->startup_cb(validator_module_state);
 
-	/* Shut down the library before cleaning up its state. */
-	mcb = palloc0_object(MemoryContextCallback);
-	mcb->func = shutdown_validator_library;
+	MemoryContextSwitchTo(oldctx);
 
-	MemoryContextRegisterResetCallback(CurrentMemoryContext, mcb);
+	before_shmem_exit(shutdown_validator_library, 0);
 }
 
 /*
  * Call the validator module's shutdown callback, if one is provided. This is
- * invoked during memory context reset.
+ * invoked during backend shutdown via before_shmem_exit.
  */
 static void
-shutdown_validator_library(void *arg)
+shutdown_validator_library(int code, Datum arg)
 {
 	if (ValidatorCallbacks->shutdown_cb != NULL)
 		ValidatorCallbacks->shutdown_cb(validator_module_state);
