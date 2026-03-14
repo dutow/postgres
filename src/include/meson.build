@@ -73,7 +73,9 @@ pg_config_paths = configure_file(
 configure_files += pg_config_paths
 
 # Read header installation lists. Both make and meson install exactly
-# the headers enumerated in these files.
+# the headers enumerated in these files. Lists may include entries from
+# other source directories; each directory installs only locally existing
+# files (filtered via fs.is_file).
 _header_lists = {
   'public_headers.list': dir_include,
   'internal_headers.list': dir_include_internal,
@@ -85,7 +87,7 @@ foreach list_file, base_dir : _header_lists
   batch = []
   foreach line : fs.read(list_file).strip().split('\n')
     f = line.strip()
-    if f == '' or f.startswith('#')
+    if f == '' or f.startswith('#') or not fs.is_file(f)
       continue
     endif
     d = fs.parent(f)
