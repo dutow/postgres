@@ -111,6 +111,22 @@ sub validate_guc_entry
 			$entry->{name}, $entry->{group});
 	}
 
+	if ($entry->{flags})
+	{
+		my %valid_flags =
+		  extract_defines("$include_path/utils/guc.h", 'GUC_');
+		for my $flag (split /\s*\|\s*/, $entry->{flags})
+		{
+			unless ($valid_flags{$flag})
+			{
+				die sprintf(
+					qq{%s:%d: error: entry "%s" has unrecognized flag "%s"\n},
+					$input_fname, $entry->{line_number},
+					$entry->{name}, $flag);
+			}
+		}
+	}
+
 	unless (exists $type_specific_fields{ $entry->{type} })
 	{
 		die sprintf(
@@ -224,6 +240,35 @@ sub print_table
 	print $ofh "};\n";
 
 	return;
+}
+
+# Extract #define names with a given prefix from a C header file.
+# Only matches defines with a hex literal value (excluding aggregate masks
+# that use expressions).
+sub extract_defines
+{
+	my ($header, $prefix) = @_;
+	my %values;
+
+	open(my $fh, '<', $header) || die "$header: $!";
+	while (<$fh>)
+	{
+		if (/^#define\s+(\Q$prefix\E\w+)\s+0x[0-9a-fA-F]+\b/)
+		{
+			$values{$1} = 1;
+		}
+		elsif (/^#define\s+(\Q$prefix\E\w+)\s+\\$/)
+		{
+			# Continuation line: check if the next line has a hex value.
+			my $name = $1;
+			my $next = <$fh>;
+			$values{$name} = 1
+			  if defined $next && $next =~ /^\s+0x[0-9a-fA-F]+\b/;
+		}
+	}
+	close $fh;
+	die "$header: no defines with prefix $prefix found\n" unless %values;
+	return %values;
 }
 
 # Extract enum member names from a C header file.
