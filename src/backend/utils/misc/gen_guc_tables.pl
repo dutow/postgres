@@ -133,10 +133,17 @@ sub print_table
 	{
 		validate_guc_entry($entry);
 
-		if (defined($prev_name) && lc($prev_name) ge lc($entry->{name}))
+		if (defined($prev_name) && lc($prev_name) eq lc($entry->{name}))
 		{
 			die sprintf(
-				"entries are not in alphabetical order: \"%s\", \"%s\"\n",
+				qq{%s:%d: error: duplicate entry "%s"\n},
+				$input_fname, $entry->{line_number}, $entry->{name});
+		}
+		if (defined($prev_name) && lc($prev_name) gt lc($entry->{name}))
+		{
+			die sprintf(
+				qq{%s:%d: error: entries are not in alphabetical order: "%s", "%s"\n},
+				$input_fname, $entry->{line_number},
 				$prev_name, $entry->{name});
 		}
 
