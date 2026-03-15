@@ -83,6 +83,13 @@ sub validate_guc_entry
 		}
 	}
 
+	unless ($entry->{name} =~ /^[a-zA-Z][a-zA-Z0-9_]*$/)
+	{
+		die sprintf(
+			qq{%s:%d: error: entry name "%s" is not a valid GUC name (must start with a letter, contain only letters, digits, and underscores)\n},
+			$input_fname, $entry->{line_number}, $entry->{name});
+	}
+
 	unless (exists $type_specific_fields{ $entry->{type} })
 	{
 		die sprintf(
