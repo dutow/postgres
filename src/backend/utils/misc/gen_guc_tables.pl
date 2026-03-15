@@ -45,12 +45,12 @@ sub validate_guc_entry
 	my @required_common =
 	  qw(name type context group short_desc variable boot_val);
 
-	my %required_by_type = (
-		int => [qw(min max)],
-		real => [qw(min max)],
-		enum => [qw(options)],
-		bool => [],      # no extra required fields
-		string => [],    # no extra required fields
+	my %type_specific_fields = (
+		int => { map { $_ => 1 } qw(min max) },
+		real => { map { $_ => 1 } qw(min max) },
+		enum => { map { $_ => 1 } qw(options) },
+		bool => {},
+		string => {},
 	);
 
 	# All fields recognized by the generator.  "line_number" is injected
@@ -83,7 +83,7 @@ sub validate_guc_entry
 		}
 	}
 
-	unless (exists $required_by_type{ $entry->{type} })
+	unless (exists $type_specific_fields{ $entry->{type} })
 	{
 		die sprintf(
 			qq{%s:%d: error: entry "%s" has unrecognized GUC type "%s"\n},
@@ -91,12 +91,28 @@ sub validate_guc_entry
 			$entry->{name}, $entry->{type} // '<unknown>');
 	}
 
-	for my $f (@{ $required_by_type{ $entry->{type} } })
+	my $fields_for_type = $type_specific_fields{ $entry->{type} };
+
+	for my $f (sort keys %$fields_for_type)
 	{
 		unless (defined $entry->{$f})
 		{
 			die sprintf(
 				qq{%s:%d: error: entry "%s" of type "%s" is missing required field "%s"\n},
+				$input_fname, $entry->{line_number}, $entry->{name},
+				$entry->{type}, $f);
+		}
+	}
+
+	my %all_type_specific;
+	$all_type_specific{$_} = 1
+	  for map { keys %$_ } values %type_specific_fields;
+	for my $f (sort keys %$entry)
+	{
+		if ($all_type_specific{$f} && !$fields_for_type->{$f})
+		{
+			die sprintf(
+				qq{%s:%d: error: entry "%s" of type "%s" must not have field "%s"\n},
 				$input_fname, $entry->{line_number}, $entry->{name},
 				$entry->{type}, $f);
 		}
