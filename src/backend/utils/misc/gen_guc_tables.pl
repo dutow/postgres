@@ -101,6 +101,16 @@ sub validate_guc_entry
 			$entry->{name}, $entry->{context});
 	}
 
+	my %valid_groups =
+	  extract_enum("$include_path/utils/guc_tables.h", 'config_group');
+	unless ($valid_groups{ $entry->{group} })
+	{
+		die sprintf(
+			qq{%s:%d: error: entry "%s" has unrecognized group "%s"\n},
+			$input_fname, $entry->{line_number},
+			$entry->{name}, $entry->{group});
+	}
+
 	unless (exists $type_specific_fields{ $entry->{type} })
 	{
 		die sprintf(
