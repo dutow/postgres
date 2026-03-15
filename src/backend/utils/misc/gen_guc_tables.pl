@@ -20,6 +20,8 @@ use Catalog;
 die "Usage: $0 INPUT_FILE OUTPUT_FILE\n" unless @ARGV == 2;
 my ($input_fname, $output_fname) = @ARGV;
 
+my $include_path = "$FindBin::RealBin/../../../include";
+
 my $parse = Catalog::ParseData($input_fname);
 
 open my $ofh, '>', $output_fname or die;
@@ -88,6 +90,15 @@ sub validate_guc_entry
 		die sprintf(
 			qq{%s:%d: error: entry name "%s" is not a valid GUC name (must start with a letter, contain only letters, digits, and underscores)\n},
 			$input_fname, $entry->{line_number}, $entry->{name});
+	}
+
+	my %valid_contexts = extract_enum("$include_path/utils/guc.h", 'GucContext');
+	unless ($valid_contexts{ $entry->{context} })
+	{
+		die sprintf(
+			qq{%s:%d: error: entry "%s" has unrecognized context "%s"\n},
+			$input_fname, $entry->{line_number},
+			$entry->{name}, $entry->{context});
 	}
 
 	unless (exists $type_specific_fields{ $entry->{type} })
@@ -203,6 +214,50 @@ sub print_table
 	print $ofh "};\n";
 
 	return;
+}
+
+# Extract enum member names from a C header file.
+# Handles both "typedef enum { ... } Name;" and "enum Name { ... };".
+sub extract_enum
+{
+	my ($header, $enum_name) = @_;
+	my @members;
+	my $in_enum = 0;
+	my $found_name = '';
+
+	open(my $fh, '<', $header) || die "$header: $!";
+	while (<$fh>)
+	{
+		if ($in_enum)
+		{
+			if (/^\}\s*(\w*)\s*;/)
+			{
+				$found_name = $1 if $1;
+				if ($found_name eq $enum_name)
+				{
+					close $fh;
+					return map { $_ => 1 } @members;
+				}
+				@members = ();
+				$in_enum = 0;
+				next;
+			}
+			push @members, $1 if /^\s+(\w+)/;
+		}
+
+		if (/^(typedef\s+)?enum\s+(\w+)/)
+		{
+			$found_name = $2;
+			$in_enum = 1;
+		}
+		elsif (/^(typedef\s+)?enum\s*$/)
+		{
+			$found_name = '';
+			$in_enum = 1;
+		}
+	}
+	close $fh;
+	die "$header: enum $enum_name not found\n";
 }
 
 sub print_boilerplate
