@@ -926,13 +926,25 @@ endif
 ###############################################################
 
 llvmopt = get_option('llvm')
+pg_tidy_opt = get_option('pg_tidy')
 llvm = not_found_dep
+llvm_binpath = ''
+pg_tidy_enabled = false
 if have_cxx
-  llvm = dependency('llvm', version: '>=14', method: 'config-tool', required: llvmopt)
+  # Detect LLVM if needed for JIT or pg_tidy
+  llvm_required = llvmopt.enabled() or pg_tidy_opt.enabled()
+  llvm_needed = not llvmopt.disabled() or not pg_tidy_opt.disabled()
+  if llvm_needed
+    llvm = dependency('llvm', version: '>=14', method: 'config-tool',
+                      required: llvm_required)
+  endif
 
   if llvm.found()
 
-    cdata.set('USE_LLVM', 1)
+    llvm_jit_enabled = not llvmopt.disabled()
+    if llvm_jit_enabled
+      cdata.set('USE_LLVM', 1)
+    endif
 
     llvm_binpath = llvm.get_variable(configtool: 'bindir')
 
@@ -941,14 +953,37 @@ if have_cxx
     # Some distros put LLVM and clang in different paths, so fallback to
     # find via PATH, too.
     clang = find_program(llvm_binpath / 'clang', 'clang', required: true)
+  else
+    llvm_jit_enabled = false
   endif
 else
-  msg = 'llvm requires a C++ compiler'
-  if llvmopt.auto()
+  llvm_jit_enabled = false
+  msg = 'llvm/pg_tidy requires a C++ compiler'
+  if llvmopt.auto() and pg_tidy_opt.auto()
     message(msg)
-  elif llvmopt.enabled()
+  elif llvmopt.enabled() or pg_tidy_opt.enabled()
     error(msg)
   endif
+endif
+
+
+###############################################################
+# Tool: pg-tidy (clang-tidy checks for PostgreSQL)
+###############################################################
+
+clang_tidy_prog = disabler()
+clang_cpp_dep = not_found_dep
+if not pg_tidy_opt.disabled() and llvm.found() and have_cxx
+  clang_tidy_prog = find_program(llvm_binpath / 'clang-tidy', 'clang-tidy',
+                                 required: pg_tidy_opt)
+  if clang_tidy_prog.found()
+    clang_cpp_dep = cxx.find_library('clang-cpp', required: pg_tidy_opt)
+    if clang_cpp_dep.found()
+      pg_tidy_enabled = true
+    endif
+  endif
+elif pg_tidy_opt.enabled()
+  error('pg_tidy requires LLVM and a C++ compiler')
 endif
 
 

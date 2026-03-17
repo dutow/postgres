@@ -1,6 +1,6 @@
 # Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
-if not llvm.found()
+if not llvm_jit_enabled
   subdir_done()
 endif
 

@@ -1,0 +1,15 @@
+import os
+import lit.formats
+
+config.name = "pg-tidy"
+config.test_format = lit.formats.ShTest(True)
+config.suffixes = ['.c']
+
+config.test_source_root = '@TEST_SOURCE_DIR@'
+
+config.substitutions.append(('%clang_tidy', '@CLANG_TIDY@'))
+config.substitutions.append(('%pg_tidy_lib', '@PG_TIDY_LIB@'))
+config.substitutions.append(('%FileCheck', '@FILECHECK@'))
+config.substitutions.append(('%include_dir', '@INCLUDE_DIR@'))
+
+lit_config.load_config(config, os.path.join(config.test_source_root, 'lit.cfg.py'))

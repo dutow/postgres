@@ -121,6 +121,9 @@ option('libxslt', type: 'feature', value: 'auto',
 option('llvm', type: 'feature', value: 'disabled',
   description: 'LLVM support')
 
+option('pg_tidy', type: 'feature', value: 'disabled',
+  description: 'pg-tidy clang-tidy checks for PostgreSQL')
+
 option('lz4', type: 'feature', value: 'auto',
   description: 'LZ4 support')
 
