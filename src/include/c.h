@@ -275,6 +275,35 @@
 #endif
 
 /*
+ * PG_NO_PADDING marks a struct definition as requiring no implicit padding.
+ * When pg-tidy clang-tidy checks are enabled, structs with this annotation
+ * will be verified at build time to contain no compiler-inserted padding.
+ *
+ * PG_REQUIRE_NO_PADDING marks a function parameter as requiring that the
+ * argument type be annotated with PG_NO_PADDING.
+ *
+ * These use compiler annotations that are checked by the pg-tidy clang-tidy
+ * plugin.  On compilers that don't support annotations, they expand to
+ * nothing.
+ */
+#ifdef __clang__
+#define PG_NO_PADDING __attribute__((annotate("pg_no_padding")))
+#define PG_REQUIRE_NO_PADDING __attribute__((annotate("pg_requires_no_padding")))
+#else
+#define PG_NO_PADDING
+#define PG_REQUIRE_NO_PADDING
+#endif
+
+/*
+ * Macros for explicit struct padding.  Use these to replace implicit
+ * compiler-inserted padding in structs marked PG_NO_PADDING.  Each macro
+ * declares a field of the appropriately sized integer type.
+ */
+#define pg_padding_1(name) uint8 name
+#define pg_padding_2(name) uint16 name
+#define pg_padding_4(name) uint32 name
+
+/*
  * Use "pg_attribute_always_inline" in place of "inline" for functions that
  * we wish to force inlining of, even when the compiler's heuristics would
  * choose not to.  But, if possible, don't force inlining in unoptimized
