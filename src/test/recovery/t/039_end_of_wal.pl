@@ -100,10 +100,11 @@ sub build_page_header
 	# I for xlp_tli
 	# II for xlp_pageaddr
 	# I for xlp_rem_len
-	return pack("SSIIII",
+	# I for pg_pad
+	return pack("SSIIIII",
 		$xlp_magic, $xlp_info, $xlp_tli,
 		$BIG_ENDIAN ? 0             : $xlp_pageaddr,
-		$BIG_ENDIAN ? $xlp_pageaddr : 0, $xlp_rem_len);
+		$BIG_ENDIAN ? $xlp_pageaddr : 0, $xlp_rem_len, 0);
 }
 
 # Setup a new node.  The configuration chosen here minimizes the number

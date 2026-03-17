@@ -418,7 +418,7 @@ ginPlaceToPage(GinBtree btree, GinBtreeStack *stack,
 		if (RelationNeedsWAL(btree->index) && !btree->isBuild)
 		{
 			XLogRecPtr	recptr;
-			ginxlogInsert xlrec;
+			ginxlogInsert xlrec = {0};
 			BlockIdData childblknos[2];
 
 			xlrec.flags = xlflags;
@@ -433,7 +433,7 @@ ginPlaceToPage(GinBtree btree, GinBtreeStack *stack,
 			{
 				BlockIdSet(&childblknos[0], BufferGetBlockNumber(childbuf));
 				BlockIdSet(&childblknos[1], GinPageGetOpaque(childpage)->rightlink);
-				XLogRegisterData(childblknos,
+				XLogRegisterData((char *) childblknos,
 								 sizeof(BlockIdData) * 2);
 			}
 
@@ -457,7 +457,7 @@ ginPlaceToPage(GinBtree btree, GinBtreeStack *stack,
 		 */
 		Buffer		rbuffer;
 		BlockNumber savedRightLink;
-		ginxlogSplit data;
+		ginxlogSplit data = {0};
 		Buffer		lbuffer = InvalidBuffer;
 		Page		newrootpg = NULL;
 

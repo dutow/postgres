@@ -43,7 +43,7 @@ XLogRecPtr
 LogLogicalMessage(const char *prefix, const char *message, size_t size,
 				  bool transactional, bool flush)
 {
-	xl_logical_message xlrec;
+	xl_logical_message xlrec = {0};
 	XLogRecPtr	lsn;
 
 	/*

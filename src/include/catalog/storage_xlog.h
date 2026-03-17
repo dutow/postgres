@@ -30,7 +30,7 @@
 #define XLOG_SMGR_CREATE	0x10
 #define XLOG_SMGR_TRUNCATE	0x20
 
-typedef struct xl_smgr_create
+typedef struct PG_NO_PADDING xl_smgr_create
 {
 	RelFileLocator rlocator;
 	ForkNumber	forkNum;
@@ -43,7 +43,7 @@ typedef struct xl_smgr_create
 #define SMGR_TRUNCATE_ALL		\
 	(SMGR_TRUNCATE_HEAP|SMGR_TRUNCATE_VM|SMGR_TRUNCATE_FSM)
 
-typedef struct xl_smgr_truncate
+typedef struct PG_NO_PADDING xl_smgr_truncate
 {
 	BlockNumber blkno;
 	RelFileLocator rlocator;

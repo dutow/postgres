@@ -27,13 +27,13 @@ extern PGDLLIMPORT bool allow_in_place_tablespaces;
 #define XLOG_TBLSPC_CREATE		0x00
 #define XLOG_TBLSPC_DROP		0x10
 
-typedef struct xl_tblspc_create_rec
+typedef struct PG_NO_PADDING xl_tblspc_create_rec
 {
 	Oid			ts_id;
 	char		ts_path[FLEXIBLE_ARRAY_MEMBER]; /* null-terminated string */
 } xl_tblspc_create_rec;
 
-typedef struct xl_tblspc_drop_rec
+typedef struct PG_NO_PADDING xl_tblspc_drop_rec
 {
 	Oid			ts_id;
 } xl_tblspc_drop_rec;

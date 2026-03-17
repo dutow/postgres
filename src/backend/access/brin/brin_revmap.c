@@ -408,7 +408,7 @@ brinRevmapDesummarizeRange(Relation idxrel, BlockNumber heapBlk)
 
 	if (RelationNeedsWAL(idxrel))
 	{
-		xl_brin_desummarize xlrec;
+		xl_brin_desummarize xlrec = {0};
 		XLogRecPtr	recptr;
 
 		xlrec.pagesPerRange = revmap->rm_pagesPerRange;
@@ -621,7 +621,7 @@ revmap_physical_extend(BrinRevmap *revmap)
 
 	if (RelationNeedsWAL(revmap->rm_irel))
 	{
-		xl_brin_revmap_extend xlrec;
+		xl_brin_revmap_extend xlrec = {0};
 		XLogRecPtr	recptr;
 
 		xlrec.targetBlk = mapBlk;

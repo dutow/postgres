@@ -495,7 +495,7 @@ gistXLogSplit(bool page_is_leaf,
 			  BlockNumber origrlink, GistNSN orignsn,
 			  Buffer leftchildbuf, bool markfollowright)
 {
-	gistxlogPageSplit xlrec;
+	gistxlogPageSplit xlrec = {0};
 	SplitPageLayout *ptr;
 	int			npage = 0;
 	XLogRecPtr	recptr;
@@ -550,7 +550,7 @@ XLogRecPtr
 gistXLogPageDelete(Buffer buffer, FullTransactionId xid,
 				   Buffer parentBuffer, OffsetNumber downlinkOffset)
 {
-	gistxlogPageDelete xlrec;
+	gistxlogPageDelete xlrec = {0};
 	XLogRecPtr	recptr;
 
 	xlrec.deleteXid = xid;
@@ -592,7 +592,7 @@ void
 gistXLogPageReuse(Relation rel, Relation heaprel,
 				  BlockNumber blkno, FullTransactionId deleteXid)
 {
-	gistxlogPageReuse xlrec_reuse;
+	gistxlogPageReuse xlrec_reuse = {0};
 
 	/*
 	 * Note that we don't register the buffer with the record, because this
@@ -629,7 +629,7 @@ gistXLogUpdate(Buffer buffer,
 			   IndexTuple *itup, int ituplen,
 			   Buffer leftchildbuf)
 {
-	gistxlogPageUpdate xlrec;
+	gistxlogPageUpdate xlrec = {0};
 	int			i;
 	XLogRecPtr	recptr;
 
@@ -668,7 +668,7 @@ XLogRecPtr
 gistXLogDelete(Buffer buffer, OffsetNumber *todelete, int ntodelete,
 			   TransactionId snapshotConflictHorizon, Relation heaprel)
 {
-	gistxlogDelete xlrec;
+	gistxlogDelete xlrec = {0};
 	XLogRecPtr	recptr;
 
 	xlrec.isCatalogRel = RelationIsAccessibleInLogicalDecoding(heaprel);

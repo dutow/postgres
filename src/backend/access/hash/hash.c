@@ -613,7 +613,7 @@ loop_top:
 	/* XLOG stuff */
 	if (RelationNeedsWAL(rel))
 	{
-		xl_hash_update_meta_page xlrec;
+		xl_hash_update_meta_page xlrec = {0};
 		XLogRecPtr	recptr;
 
 		xlrec.ntuples = metap->hashm_ntuples;
@@ -819,7 +819,7 @@ hashbucketcleanup(Relation rel, Bucket cur_bucket, Buffer bucket_buf,
 			/* XLOG stuff */
 			if (RelationNeedsWAL(rel))
 			{
-				xl_hash_delete xlrec;
+				xl_hash_delete xlrec = {0};
 				XLogRecPtr	recptr;
 
 				xlrec.clear_dead_marking = clear_dead_marking;

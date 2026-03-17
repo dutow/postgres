@@ -761,7 +761,7 @@ AssignTransactionId(TransactionState s)
 		if (nUnreportedXids >= PGPROC_MAX_CACHED_SUBXIDS ||
 			log_unknown_top)
 		{
-			xl_xact_assignment xlrec;
+			xl_xact_assignment xlrec = {0};
 
 			/*
 			 * xtop is always set by now because we recurse up transaction
@@ -5842,15 +5842,15 @@ XactLogCommitRecord(TimestampTz commit_time,
 					int xactflags, TransactionId twophase_xid,
 					const char *twophase_gid)
 {
-	xl_xact_commit xlrec;
-	xl_xact_xinfo xl_xinfo;
-	xl_xact_dbinfo xl_dbinfo;
-	xl_xact_subxacts xl_subxacts;
-	xl_xact_relfilelocators xl_relfilelocators;
-	xl_xact_stats_items xl_dropped_stats;
-	xl_xact_invals xl_invals;
-	xl_xact_twophase xl_twophase;
-	xl_xact_origin xl_origin;
+	xl_xact_commit xlrec = {0};
+	xl_xact_xinfo xl_xinfo = {0};
+	xl_xact_dbinfo xl_dbinfo = {0};
+	xl_xact_subxacts xl_subxacts = {0};
+	xl_xact_relfilelocators xl_relfilelocators = {0};
+	xl_xact_stats_items xl_dropped_stats = {0};
+	xl_xact_invals xl_invals = {0};
+	xl_xact_twophase xl_twophase = {0};
+	xl_xact_origin xl_origin = {0};
 	uint8		info;
 
 	Assert(CritSectionCount > 0);
@@ -5963,7 +5963,7 @@ XactLogCommitRecord(TimestampTz commit_time,
 	{
 		XLogRegisterData(&xl_relfilelocators,
 						 MinSizeOfXactRelfileLocators);
-		XLogRegisterData(rels,
+		XLogRegisterData((char *) rels,
 						 nrels * sizeof(RelFileLocator));
 	}
 
@@ -5971,14 +5971,14 @@ XactLogCommitRecord(TimestampTz commit_time,
 	{
 		XLogRegisterData(&xl_dropped_stats,
 						 MinSizeOfXactStatsItems);
-		XLogRegisterData(droppedstats,
+		XLogRegisterData((char *) droppedstats,
 						 ndroppedstats * sizeof(xl_xact_stats_item));
 	}
 
 	if (xl_xinfo.xinfo & XACT_XINFO_HAS_INVALS)
 	{
 		XLogRegisterData(&xl_invals, MinSizeOfXactInvals);
-		XLogRegisterData(msgs,
+		XLogRegisterData((char *) msgs,
 						 nmsgs * sizeof(SharedInvalidationMessage));
 	}
 
@@ -6012,14 +6012,14 @@ XactLogAbortRecord(TimestampTz abort_time,
 				   int xactflags, TransactionId twophase_xid,
 				   const char *twophase_gid)
 {
-	xl_xact_abort xlrec;
-	xl_xact_xinfo xl_xinfo;
-	xl_xact_subxacts xl_subxacts;
-	xl_xact_relfilelocators xl_relfilelocators;
-	xl_xact_stats_items xl_dropped_stats;
-	xl_xact_twophase xl_twophase;
-	xl_xact_dbinfo xl_dbinfo;
-	xl_xact_origin xl_origin;
+	xl_xact_abort xlrec = {0};
+	xl_xact_xinfo xl_xinfo = {0};
+	xl_xact_subxacts xl_subxacts = {0};
+	xl_xact_relfilelocators xl_relfilelocators = {0};
+	xl_xact_stats_items xl_dropped_stats = {0};
+	xl_xact_twophase xl_twophase = {0};
+	xl_xact_dbinfo xl_dbinfo = {0};
+	xl_xact_origin xl_origin = {0};
 
 	uint8		info;
 
@@ -6116,7 +6116,7 @@ XactLogAbortRecord(TimestampTz abort_time,
 	{
 		XLogRegisterData(&xl_relfilelocators,
 						 MinSizeOfXactRelfileLocators);
-		XLogRegisterData(rels,
+		XLogRegisterData((char *) rels,
 						 nrels * sizeof(RelFileLocator));
 	}
 
@@ -6124,7 +6124,7 @@ XactLogAbortRecord(TimestampTz abort_time,
 	{
 		XLogRegisterData(&xl_dropped_stats,
 						 MinSizeOfXactStatsItems);
-		XLogRegisterData(droppedstats,
+		XLogRegisterData((char *) droppedstats,
 						 ndroppedstats * sizeof(xl_xact_stats_item));
 	}
 

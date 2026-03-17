@@ -216,7 +216,7 @@ typedef struct SavedTransactionCharacteristics
 #define XactCompletionForceSyncCommit(xinfo) \
 	((xinfo & XACT_COMPLETION_FORCE_SYNC_COMMIT) != 0)
 
-typedef struct xl_xact_assignment
+typedef struct PG_NO_PADDING xl_xact_assignment
 {
 	TransactionId xtop;			/* assigned XID's top-level XID */
 	int			nsubxacts;		/* number of subtransaction XIDs */
@@ -242,7 +242,7 @@ typedef struct xl_xact_assignment
 
 /* sub-records for commit/abort */
 
-typedef struct xl_xact_xinfo
+typedef struct PG_NO_PADDING xl_xact_xinfo
 {
 	/*
 	 * Even though we right now only require two bytes of space in xinfo we
@@ -253,20 +253,20 @@ typedef struct xl_xact_xinfo
 	uint32		xinfo;
 } xl_xact_xinfo;
 
-typedef struct xl_xact_dbinfo
+typedef struct PG_NO_PADDING xl_xact_dbinfo
 {
 	Oid			dbId;			/* MyDatabaseId */
 	Oid			tsId;			/* MyDatabaseTableSpace */
 } xl_xact_dbinfo;
 
-typedef struct xl_xact_subxacts
+typedef struct PG_NO_PADDING xl_xact_subxacts
 {
 	int			nsubxacts;		/* number of subtransaction XIDs */
 	TransactionId subxacts[FLEXIBLE_ARRAY_MEMBER];
 } xl_xact_subxacts;
 #define MinSizeOfXactSubxacts offsetof(xl_xact_subxacts, subxacts)
 
-typedef struct xl_xact_relfilelocators
+typedef struct PG_NO_PADDING xl_xact_relfilelocators
 {
 	int			nrels;			/* number of relations */
 	RelFileLocator xlocators[FLEXIBLE_ARRAY_MEMBER];
@@ -280,7 +280,7 @@ typedef struct xl_xact_relfilelocators
  * frontend code, but the WAL format needs to be readable by frontend
  * programs.
  */
-typedef struct xl_xact_stats_item
+typedef struct PG_NO_PADDING xl_xact_stats_item
 {
 	int			kind;
 	Oid			dboid;
@@ -293,32 +293,32 @@ typedef struct xl_xact_stats_item
 	uint32		objid_hi;
 } xl_xact_stats_item;
 
-typedef struct xl_xact_stats_items
+typedef struct PG_NO_PADDING xl_xact_stats_items
 {
 	int			nitems;
 	xl_xact_stats_item items[FLEXIBLE_ARRAY_MEMBER];
 } xl_xact_stats_items;
 #define MinSizeOfXactStatsItems offsetof(xl_xact_stats_items, items)
 
-typedef struct xl_xact_invals
+typedef struct PG_NO_PADDING xl_xact_invals
 {
 	int			nmsgs;			/* number of shared inval msgs */
 	SharedInvalidationMessage msgs[FLEXIBLE_ARRAY_MEMBER];
 } xl_xact_invals;
 #define MinSizeOfXactInvals offsetof(xl_xact_invals, msgs)
 
-typedef struct xl_xact_twophase
+typedef struct PG_NO_PADDING xl_xact_twophase
 {
 	TransactionId xid;
 } xl_xact_twophase;
 
-typedef struct xl_xact_origin
+typedef struct PG_NO_PADDING xl_xact_origin
 {
 	XLogRecPtr	origin_lsn;
 	TimestampTz origin_timestamp;
 } xl_xact_origin;
 
-typedef struct xl_xact_commit
+typedef struct PG_NO_PADDING xl_xact_commit
 {
 	TimestampTz xact_time;		/* time of commit */
 
@@ -334,7 +334,7 @@ typedef struct xl_xact_commit
 } xl_xact_commit;
 #define MinSizeOfXactCommit (offsetof(xl_xact_commit, xact_time) + sizeof(TimestampTz))
 
-typedef struct xl_xact_abort
+typedef struct PG_NO_PADDING xl_xact_abort
 {
 	TimestampTz xact_time;		/* time of abort */
 

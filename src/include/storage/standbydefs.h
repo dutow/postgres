@@ -35,7 +35,7 @@ extern void standby_desc_invalidations(StringInfo buf,
 #define XLOG_RUNNING_XACTS			0x10
 #define XLOG_INVALIDATIONS			0x20
 
-typedef struct xl_standby_locks
+typedef struct PG_NO_PADDING xl_standby_locks
 {
 	int			nlocks;			/* number of entries in locks array */
 	xl_standby_lock locks[FLEXIBLE_ARRAY_MEMBER];
@@ -44,11 +44,13 @@ typedef struct xl_standby_locks
 /*
  * When we write running xact data to WAL, we use this structure.
  */
-typedef struct xl_running_xacts
+typedef struct PG_NO_PADDING xl_running_xacts
 {
 	int			xcnt;			/* # of xact ids in xids[] */
 	int			subxcnt;		/* # of subxact ids in xids[] */
 	bool		subxid_overflow;	/* snapshot overflowed, subxids missing */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	TransactionId nextXid;		/* xid from TransamVariables->nextXid */
 	TransactionId oldestRunningXid; /* *not* oldestXmin */
 	TransactionId latestCompletedXid;	/* so we can set xmax */
@@ -60,11 +62,13 @@ typedef struct xl_running_xacts
  * Invalidations for standby, currently only when transactions without an
  * assigned xid commit.
  */
-typedef struct xl_invalidations
+typedef struct PG_NO_PADDING xl_invalidations
 {
 	Oid			dbId;			/* MyDatabaseId */
 	Oid			tsId;			/* MyDatabaseTableSpace */
 	bool		relcacheInitFileInval;	/* invalidate relcache init files */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	int			nmsgs;			/* number of shared inval msgs */
 	SharedInvalidationMessage msgs[FLEXIBLE_ARRAY_MEMBER];
 } xl_invalidations;

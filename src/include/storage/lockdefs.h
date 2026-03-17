@@ -51,7 +51,7 @@ typedef int LOCKMODE;
 #define InplaceUpdateTupleLock ExclusiveLock
 
 /* WAL representation of an AccessExclusiveLock on a table */
-typedef struct xl_standby_lock
+typedef struct PG_NO_PADDING xl_standby_lock
 {
 	TransactionId xid;			/* xid of holder of AccessExclusiveLock */
 	Oid			dbOid;			/* DB containing table */

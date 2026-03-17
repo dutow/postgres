@@ -526,7 +526,7 @@ InitWalRecovery(ControlFileData *ControlFile, bool *wasShutdown_ptr,
 	DBState		dbstate_at_startup;
 	bool		haveTblspcMap = false;
 	bool		haveBackupLabel = false;
-	CheckPoint	checkPoint;
+	CheckPoint	checkPoint = {0};
 	bool		backupFromStandby = false;
 
 	dbstate_at_startup = ControlFile->state;
@@ -1971,7 +1971,7 @@ ApplyWalRecord(XLogReaderState *xlogreader, XLogRecord *record, TimeLineID *repl
 
 		if (info == XLOG_CHECKPOINT_SHUTDOWN)
 		{
-			CheckPoint	checkPoint;
+			CheckPoint	checkPoint = {0};
 
 			memcpy(&checkPoint, XLogRecGetData(xlogreader), sizeof(CheckPoint));
 			newReplayTLI = checkPoint.ThisTimeLineID;
@@ -1979,7 +1979,7 @@ ApplyWalRecord(XLogReaderState *xlogreader, XLogRecord *record, TimeLineID *repl
 		}
 		else if (info == XLOG_END_OF_RECOVERY)
 		{
-			xl_end_of_recovery xlrec;
+			xl_end_of_recovery xlrec = {0};
 
 			memcpy(&xlrec, XLogRecGetData(xlogreader), sizeof(xl_end_of_recovery));
 			newReplayTLI = xlrec.ThisTimeLineID;
@@ -2113,7 +2113,7 @@ xlogrecovery_redo(XLogReaderState *record, TimeLineID replayTLI)
 	if (info == XLOG_OVERWRITE_CONTRECORD)
 	{
 		/* Verify the payload of a XLOG_OVERWRITE_CONTRECORD record. */
-		xl_overwrite_contrecord xlrec;
+		xl_overwrite_contrecord xlrec = {0};
 
 		memcpy(&xlrec, XLogRecGetData(record), sizeof(xl_overwrite_contrecord));
 		if (xlrec.overwritten_lsn != record->overwrittenRecPtr)

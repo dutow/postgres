@@ -186,7 +186,7 @@ RelationCreateStorage(RelFileLocator rlocator, char relpersistence,
 void
 log_smgrcreate(const RelFileLocator *rlocator, ForkNumber forkNum)
 {
-	xl_smgr_create xlrec;
+	xl_smgr_create xlrec = {0};
 
 	/*
 	 * Make an XLOG entry reporting the file creation.
@@ -391,7 +391,7 @@ RelationTruncate(Relation rel, BlockNumber nblocks)
 		 * Make an XLOG entry reporting the file truncation.
 		 */
 		XLogRecPtr	lsn;
-		xl_smgr_truncate xlrec;
+		xl_smgr_truncate xlrec = {0};
 
 		xlrec.blkno = nblocks;
 		xlrec.rlocator = rel->rd_locator;

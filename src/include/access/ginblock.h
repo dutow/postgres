@@ -52,7 +52,7 @@ typedef GinPageOpaqueData *GinPageOpaque;
 #define GIN_METAPAGE_BLKNO	(0)
 #define GIN_ROOT_BLKNO		(1)
 
-typedef struct GinMetaPageData
+typedef struct PG_NO_PADDING GinMetaPageData
 {
 	/*
 	 * Pointers to head and tail of pending list, which consists of GIN_LIST
@@ -80,6 +80,7 @@ typedef struct GinMetaPageData
 	BlockNumber nTotalPages;
 	BlockNumber nEntryPages;
 	BlockNumber nDataPages;
+	pg_padding_4(pg_pad1);
 	int64		nEntries;
 
 	/*
@@ -98,6 +99,7 @@ typedef struct GinMetaPageData
 	 * Reject full-index-scan attempts on such indexes.
 	 */
 	int32		ginVersion;
+	pg_padding_4(pg_pad2);
 } GinMetaPageData;
 
 #define GIN_CURRENT_VERSION		2
@@ -333,7 +335,7 @@ typedef signed char GinNullCategory;
  *
  * Note: This requires 2-byte alignment.
  */
-typedef struct
+typedef struct PG_NO_PADDING
 {
 	ItemPointerData first;		/* first item in this posting list (unpacked) */
 	uint16		nbytes;			/* number of bytes that follow */

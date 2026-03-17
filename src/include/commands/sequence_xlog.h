@@ -31,7 +31,7 @@ typedef struct sequence_magic
 } sequence_magic;
 
 /* Sequence WAL record */
-typedef struct xl_seq_rec
+typedef struct PG_NO_PADDING xl_seq_rec
 {
 	RelFileLocator locator;
 	/* SEQUENCE TUPLE DATA FOLLOWS AT THE END */

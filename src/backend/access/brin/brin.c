@@ -1135,7 +1135,7 @@ brinbuild(Relation heap, Relation index, IndexInfo *indexInfo)
 
 	if (RelationNeedsWAL(index))
 	{
-		xl_brin_createidx xlrec;
+		xl_brin_createidx xlrec = {0};
 		XLogRecPtr	recptr;
 		Page		page;
 

@@ -292,14 +292,14 @@ typedef struct SpGistCache
  * opclasses.  Going forward, we will be using a fixed size of Datum so that
  * there's no longer any pressing reason to change this.
  */
-typedef struct SpGistInnerTupleData
+typedef struct PG_NO_PADDING SpGistInnerTupleData
 {
 	unsigned int tupstate:2,	/* LIVE/REDIRECT/DEAD/PLACEHOLDER */
 				allTheSame:1,	/* all nodes in tuple are equivalent */
 				nNodes:13,		/* number of nodes within inner tuple */
 				prefixSize:16;	/* size of prefix, or 0 if none */
 	uint16		size;			/* total size of inner tuple */
-	/* On most machines there will be a couple of wasted bytes here */
+	pg_padding_2(pg_pad);
 	/* prefix datum follows, then nodes */
 } SpGistInnerTupleData;
 
@@ -382,7 +382,7 @@ typedef SpGistNodeTupleData *SpGistNodeTuple;
  * restriction only adds bytes for a NULL leaf datum; otherwise alignment
  * restrictions force it anyway.)
  */
-typedef struct SpGistLeafTupleData
+typedef struct PG_NO_PADDING SpGistLeafTupleData
 {
 	unsigned int tupstate:2,	/* LIVE/REDIRECT/DEAD/PLACEHOLDER */
 				size:30;		/* large enough for any palloc'able value */

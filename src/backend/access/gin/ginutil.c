@@ -648,7 +648,7 @@ ginUpdateStats(Relation index, const GinStatsData *stats, bool is_build)
 	if (RelationNeedsWAL(index) && !is_build)
 	{
 		XLogRecPtr	recptr;
-		ginxlogUpdateMeta data;
+		ginxlogUpdateMeta data = {0};
 
 		data.locator = index->rd_locator;
 		data.ntuples = 0;

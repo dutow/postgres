@@ -382,7 +382,7 @@ found:
 	if (RelationNeedsWAL(rel))
 	{
 		XLogRecPtr	recptr;
-		xl_hash_add_ovfl_page xlrec;
+		xl_hash_add_ovfl_page xlrec = {0};
 
 		xlrec.bmpage_found = page_found;
 		xlrec.bmsize = metap->hashm_bmsize;
@@ -644,7 +644,7 @@ _hash_freeovflpage(Relation rel, Buffer bucketbuf, Buffer ovflbuf,
 	/* XLOG stuff */
 	if (RelationNeedsWAL(rel))
 	{
-		xl_hash_squeeze_page xlrec;
+		xl_hash_squeeze_page xlrec = {0};
 		XLogRecPtr	recptr;
 		int			i;
 		bool		mod_wbuf = false;
@@ -987,7 +987,7 @@ readpage:
 					if (RelationNeedsWAL(rel))
 					{
 						XLogRecPtr	recptr;
-						xl_hash_move_page_contents xlrec;
+						xl_hash_move_page_contents xlrec = {0};
 
 						xlrec.ntups = nitups;
 						xlrec.is_prim_bucket_same_wrt = (wbuf == bucket_buf);

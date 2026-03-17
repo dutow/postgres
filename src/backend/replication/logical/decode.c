@@ -1245,7 +1245,7 @@ DecodeSpecConfirm(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 static void
 DecodeXLogTuple(char *data, Size len, HeapTuple tuple)
 {
-	xl_heap_header xlhdr;
+	xl_heap_header xlhdr = {0};
 	int			datalen = len - SizeOfHeapHeader;
 	HeapTupleHeader header;
 

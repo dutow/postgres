@@ -46,14 +46,14 @@ extern int	committssyncfiletag(const FileTag *ftag, char *path);
 #define COMMIT_TS_ZEROPAGE		0x00
 #define COMMIT_TS_TRUNCATE		0x10
 
-typedef struct xl_commit_ts_truncate
+typedef struct PG_NO_PADDING xl_commit_ts_truncate
 {
 	int64		pageno;
 	TransactionId oldestXid;
+	pg_padding_4(pg_pad);
 } xl_commit_ts_truncate;
 
-#define SizeOfCommitTsTruncate	(offsetof(xl_commit_ts_truncate, oldestXid) + \
-								 sizeof(TransactionId))
+#define SizeOfCommitTsTruncate	(sizeof(xl_commit_ts_truncate))
 
 extern void commit_ts_redo(XLogReaderState *record);
 extern void commit_ts_desc(StringInfo buf, XLogReaderState *record);

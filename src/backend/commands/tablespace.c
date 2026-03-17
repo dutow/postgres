@@ -365,7 +365,7 @@ CreateTableSpace(CreateTableSpaceStmt *stmt)
 
 	/* Record the filesystem change in XLOG */
 	{
-		xl_tblspc_create_rec xlrec;
+		xl_tblspc_create_rec xlrec = {0};
 
 		xlrec.ts_id = tablespaceoid;
 
@@ -535,7 +535,7 @@ DropTableSpace(DropTableSpaceStmt *stmt)
 
 	/* Record the filesystem change in XLOG */
 	{
-		xl_tblspc_drop_rec xlrec;
+		xl_tblspc_drop_rec xlrec = {0};
 
 		xlrec.ts_id = tablespaceoid;
 

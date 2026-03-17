@@ -33,7 +33,7 @@
  */
 #define XLOG_PAGE_MAGIC 0xD11B	/* can be used as WAL version indicator */
 
-typedef struct XLogPageHeaderData
+typedef struct PG_NO_PADDING XLogPageHeaderData
 {
 	uint16		xlp_magic;		/* magic value for correctness checks */
 	uint16		xlp_info;		/* flag bits, see below */
@@ -47,6 +47,7 @@ typedef struct XLogPageHeaderData
 	 * header.  Note that the continuation data isn't necessarily aligned.
 	 */
 	uint32		xlp_rem_len;	/* total len of remaining data for record */
+	pg_padding_4(pg_pad);
 } XLogPageHeaderData;
 
 #define SizeOfXLogShortPHD	MAXALIGN(sizeof(XLogPageHeaderData))
@@ -58,7 +59,7 @@ typedef XLogPageHeaderData *XLogPageHeader;
  * page header.  (This is ordinarily done just in the first page of an
  * XLOG file.)	The additional fields serve to identify the file accurately.
  */
-typedef struct XLogLongPageHeaderData
+typedef struct PG_NO_PADDING XLogLongPageHeaderData
 {
 	XLogPageHeaderData std;		/* standard header fields */
 	uint64		xlp_sysid;		/* system identifier from pg_control */
@@ -270,7 +271,7 @@ BackupHistoryFilePath(char *path, TimeLineID tli, XLogSegNo logSegNo, XLogRecPtr
  * Information logged when we detect a change in one of the parameters
  * important for Hot Standby.
  */
-typedef struct xl_parameter_change
+typedef struct PG_NO_PADDING xl_parameter_change
 {
 	int			MaxConnections;
 	int			max_worker_processes;
@@ -280,29 +281,31 @@ typedef struct xl_parameter_change
 	int			wal_level;
 	bool		wal_log_hints;
 	bool		track_commit_timestamp;
+	pg_padding_2(pg_pad);
 } xl_parameter_change;
 
 /* logs restore point */
-typedef struct xl_restore_point
+typedef struct PG_NO_PADDING xl_restore_point
 {
 	TimestampTz rp_time;
 	char		rp_name[MAXFNAMELEN];
 } xl_restore_point;
 
 /* Overwrite of prior contrecord */
-typedef struct xl_overwrite_contrecord
+typedef struct PG_NO_PADDING xl_overwrite_contrecord
 {
 	XLogRecPtr	overwritten_lsn;
 	TimestampTz overwrite_time;
 } xl_overwrite_contrecord;
 
 /* End of recovery mark, when we don't do an END_OF_RECOVERY checkpoint */
-typedef struct xl_end_of_recovery
+typedef struct PG_NO_PADDING xl_end_of_recovery
 {
 	TimestampTz end_time;
 	TimeLineID	ThisTimeLineID; /* new TLI */
 	TimeLineID	PrevTimeLineID; /* previous TLI we forked off from */
 	int			wal_level;
+	pg_padding_4(pg_pad);
 } xl_end_of_recovery;
 
 /*

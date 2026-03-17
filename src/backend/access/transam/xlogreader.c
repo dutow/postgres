@@ -1806,9 +1806,12 @@ DecodeXLogRecord(XLogReaderState *state,
 
 			if (blk->has_image)
 			{
+				uint8		bimg_pad;
+
 				COPY_HEADER_FIELD(&blk->bimg_len, sizeof(uint16));
 				COPY_HEADER_FIELD(&blk->hole_offset, sizeof(uint16));
 				COPY_HEADER_FIELD(&blk->bimg_info, sizeof(uint8));
+				COPY_HEADER_FIELD(&bimg_pad, sizeof(uint8));
 
 				blk->apply_image = ((blk->bimg_info & BKPIMAGE_APPLY) != 0);
 

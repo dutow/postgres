@@ -1938,7 +1938,7 @@ CallRelSyncCallbacks(Oid relid)
 void
 LogLogicalInvalidations(void)
 {
-	xl_xact_invals xlrec;
+	xl_xact_invals xlrec = {0};
 	InvalidationMsgsGroup *group;
 	int			nmsgs;
 
@@ -1959,10 +1959,10 @@ LogLogicalInvalidations(void)
 		XLogBeginInsert();
 		XLogRegisterData(&xlrec, MinSizeOfXactInvals);
 		ProcessMessageSubGroupMulti(group, CatCacheMsgs,
-									XLogRegisterData(msgs,
+									XLogRegisterData((char *) msgs,
 													 n * sizeof(SharedInvalidationMessage)));
 		ProcessMessageSubGroupMulti(group, RelCacheMsgs,
-									XLogRegisterData(msgs,
+									XLogRegisterData((char *) msgs,
 													 n * sizeof(SharedInvalidationMessage)));
 		XLogInsert(RM_XACT_ID, XLOG_XACT_INVALIDATIONS);
 	}

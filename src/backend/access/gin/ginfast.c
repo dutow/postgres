@@ -115,7 +115,7 @@ writeListPage(Relation index, Buffer buffer,
 
 	if (RelationNeedsWAL(index))
 	{
-		ginxlogInsertListPage data;
+		ginxlogInsertListPage data = {0};
 		XLogRecPtr	recptr;
 
 		data.rightlink = rightlink;
@@ -224,7 +224,7 @@ ginHeapTupleFastInsert(GinState *ginstate, GinTupleCollector *collector)
 	GinMetaPageData *metadata = NULL;
 	Buffer		buffer = InvalidBuffer;
 	Page		page = NULL;
-	ginxlogUpdateMeta data;
+	ginxlogUpdateMeta data = {0};
 	bool		separateList = false;
 	bool		needCleanup = false;
 	int			cleanupSize;
@@ -281,9 +281,8 @@ ginHeapTupleFastInsert(GinState *ginstate, GinTupleCollector *collector)
 		/*
 		 * We should make sublist separately and append it to the tail
 		 */
-		GinMetaPageData sublist;
+		GinMetaPageData sublist = {0};
 
-		memset(&sublist, 0, sizeof(GinMetaPageData));
 		makeSublist(index, collector->tuples, collector->ntuples, &sublist);
 
 		/*
@@ -567,7 +566,7 @@ shiftList(Relation index, Buffer metabuffer, BlockNumber newHead,
 		Page		page;
 		int			i;
 		int64		nDeletedHeapTuples = 0;
-		ginxlogDeleteListPages data;
+		ginxlogDeleteListPages data = {0};
 		Buffer		buffers[GIN_NDELETE_AT_ONCE];
 		BlockNumber freespace[GIN_NDELETE_AT_ONCE];
 

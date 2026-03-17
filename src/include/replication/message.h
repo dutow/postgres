@@ -17,10 +17,12 @@
 /*
  * Generic logical decoding message wal record.
  */
-typedef struct xl_logical_message
+typedef struct PG_NO_PADDING xl_logical_message
 {
 	Oid			dbId;			/* database Oid emitted from */
 	bool		transactional;	/* is message transactional? */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	Size		prefix_size;	/* length of prefix */
 	Size		message_size;	/* size of the message */
 	/* payload, including null-terminated prefix of length prefix_size */

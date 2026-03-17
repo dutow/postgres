@@ -2218,8 +2218,8 @@ heap_insert(Relation relation, HeapTuple tup, CommandId cid,
 	/* XLOG stuff */
 	if (RelationNeedsWAL(relation))
 	{
-		xl_heap_insert xlrec;
-		xl_heap_header xlhdr;
+		xl_heap_insert xlrec = {0};
+		xl_heap_header xlhdr = {0};
 		XLogRecPtr	recptr;
 		Page		page = BufferGetPage(buffer);
 		uint8		info = XLOG_HEAP_INSERT;
@@ -3149,8 +3149,8 @@ l1:
 	 */
 	if (RelationNeedsWAL(relation))
 	{
-		xl_heap_delete xlrec;
-		xl_heap_header xlhdr;
+		xl_heap_delete xlrec = {0};
+		xl_heap_header xlhdr = {0};
 		XLogRecPtr	recptr;
 
 		/*
@@ -3948,7 +3948,7 @@ l2:
 
 		if (RelationNeedsWAL(relation))
 		{
-			xl_heap_lock xlrec;
+			xl_heap_lock xlrec = {0};
 			XLogRecPtr	recptr;
 
 			XLogBeginInsert();
@@ -5283,7 +5283,7 @@ failed:
 	 */
 	if (RelationNeedsWAL(relation))
 	{
-		xl_heap_lock xlrec;
+		xl_heap_lock xlrec = {0};
 		XLogRecPtr	recptr;
 
 		XLogBeginInsert();
@@ -6034,7 +6034,7 @@ l4:
 		/* XLOG stuff */
 		if (RelationNeedsWAL(rel))
 		{
-			xl_heap_lock_updated xlrec;
+			xl_heap_lock_updated xlrec = {0};
 			XLogRecPtr	recptr;
 			Page		page = BufferGetPage(buf);
 
@@ -6201,7 +6201,7 @@ heap_finish_speculative(Relation relation, const ItemPointerData *tid)
 	/* XLOG stuff */
 	if (RelationNeedsWAL(relation))
 	{
-		xl_heap_confirm xlrec;
+		xl_heap_confirm xlrec = {0};
 		XLogRecPtr	recptr;
 
 		xlrec.offnum = ItemPointerGetOffsetNumber(tid);
@@ -6346,7 +6346,7 @@ heap_abort_speculative(Relation relation, const ItemPointerData *tid)
 	 */
 	if (RelationNeedsWAL(relation))
 	{
-		xl_heap_delete xlrec;
+		xl_heap_delete xlrec = {0};
 		XLogRecPtr	recptr;
 
 		xlrec.flags = XLH_DELETE_IS_SUPER;
@@ -6646,7 +6646,7 @@ heap_inplace_update_and_unlock(Relation relation,
 	/* XLOG stuff */
 	if (RelationNeedsWAL(relation))
 	{
-		xl_heap_inplace xlrec;
+		xl_heap_inplace xlrec = {0};
 		PGAlignedBlock copied_buffer;
 		char	   *origdata = (char *) BufferGetBlock(buffer);
 		Page		page = BufferGetPage(buffer);
@@ -6667,7 +6667,7 @@ heap_inplace_update_and_unlock(Relation relation,
 		XLogBeginInsert();
 		XLogRegisterData(&xlrec, MinSizeOfHeapInplace);
 		if (nmsgs != 0)
-			XLogRegisterData(invalMessages,
+			XLogRegisterData((char *) invalMessages,
 							 nmsgs * sizeof(SharedInvalidationMessage));
 
 		/* register block matching what buffer will look like after changes */
@@ -8884,7 +8884,7 @@ XLogRecPtr
 log_heap_visible(Relation rel, Buffer heap_buffer, Buffer vm_buffer,
 				 TransactionId snapshotConflictHorizon, uint8 vmflags)
 {
-	xl_heap_visible xlrec;
+	xl_heap_visible xlrec = {0};
 	XLogRecPtr	recptr;
 	uint8		flags;
 
@@ -8920,9 +8920,9 @@ log_heap_update(Relation reln, Buffer oldbuf,
 				HeapTuple old_key_tuple,
 				bool all_visible_cleared, bool new_all_visible_cleared)
 {
-	xl_heap_update xlrec;
-	xl_heap_header xlhdr;
-	xl_heap_header xlhdr_idx;
+	xl_heap_update xlrec = {0};
+	xl_heap_header xlhdr = {0};
+	xl_heap_header xlhdr_idx = {0};
 	uint8		info;
 	uint16		prefix_suffix[2];
 	uint16		prefixlen = 0,
@@ -9139,7 +9139,7 @@ log_heap_update(Relation reln, Buffer oldbuf,
 static XLogRecPtr
 log_heap_new_cid(Relation relation, HeapTuple tup)
 {
-	xl_heap_new_cid xlrec;
+	xl_heap_new_cid xlrec = {0};
 
 	XLogRecPtr	recptr;
 	HeapTupleHeader hdr = tup->t_data;

@@ -197,7 +197,7 @@ ginDeletePage(GinVacuumState *gvs, BlockNumber deleteBlkno, BlockNumber leftBlkn
 	if (RelationNeedsWAL(gvs->index))
 	{
 		XLogRecPtr	recptr;
-		ginxlogDeletePage data;
+		ginxlogDeletePage data = {0};
 
 		/*
 		 * We can't pass REGBUF_STANDARD for the deleted page, because we

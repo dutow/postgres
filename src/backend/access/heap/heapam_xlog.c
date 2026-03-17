@@ -31,7 +31,7 @@ heap_xlog_prune_freeze(XLogReaderState *record)
 {
 	XLogRecPtr	lsn = record->EndRecPtr;
 	char	   *maindataptr = XLogRecGetData(record);
-	xl_heap_prune xlrec;
+	xl_heap_prune xlrec = {0};
 	Buffer		buffer;
 	RelFileLocator rlocator;
 	BlockNumber blkno;
@@ -504,7 +504,7 @@ heap_xlog_insert(XLogReaderState *record)
 		char		data[MaxHeapTupleSize];
 	}			tbuf;
 	HeapTupleHeader htup;
-	xl_heap_header xlhdr;
+	xl_heap_header xlhdr = {0};
 	uint32		newlen;
 	Size		freespace = 0;
 	RelFileLocator target_locator;
@@ -828,7 +828,7 @@ heap_xlog_update(XLogReaderState *record, bool hot_update)
 		HeapTupleHeaderData hdr;
 		char		data[MaxHeapTupleSize];
 	}			tbuf;
-	xl_heap_header xlhdr;
+	xl_heap_header xlhdr = {0};
 	uint32		newlen;
 	Size		freespace = 0;
 	XLogRedoAction oldaction;

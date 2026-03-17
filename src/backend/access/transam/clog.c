@@ -1044,7 +1044,7 @@ static void
 WriteTruncateXlogRec(int64 pageno, TransactionId oldestXact, Oid oldestXactDb)
 {
 	XLogRecPtr	recptr;
-	xl_clog_truncate xlrec;
+	xl_clog_truncate xlrec = {0};
 
 	xlrec.pageno = pageno;
 	xlrec.oldestXact = oldestXact;
@@ -1076,7 +1076,7 @@ clog_redo(XLogReaderState *record)
 	}
 	else if (info == CLOG_TRUNCATE)
 	{
-		xl_clog_truncate xlrec;
+		xl_clog_truncate xlrec = {0};
 
 		memcpy(&xlrec, XLogRecGetData(record), sizeof(xl_clog_truncate));
 

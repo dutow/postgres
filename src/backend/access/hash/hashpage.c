@@ -386,7 +386,7 @@ _hash_init(Relation rel, double num_tuples, ForkNumber forkNum)
 	/* XLOG stuff */
 	if (use_wal)
 	{
-		xl_hash_init_meta_page xlrec;
+		xl_hash_init_meta_page xlrec = {0};
 		XLogRecPtr	recptr;
 
 		xlrec.num_tuples = num_tuples;
@@ -462,7 +462,7 @@ _hash_init(Relation rel, double num_tuples, ForkNumber forkNum)
 	/* XLOG stuff */
 	if (use_wal)
 	{
-		xl_hash_init_bitmap_page xlrec;
+		xl_hash_init_bitmap_page xlrec = {0};
 		XLogRecPtr	recptr;
 
 		xlrec.bmsize = metap->hashm_bmsize;
@@ -899,7 +899,7 @@ restart_expand:
 	/* XLOG stuff */
 	if (RelationNeedsWAL(rel))
 	{
-		xl_hash_split_allocate_page xlrec;
+		xl_hash_split_allocate_page xlrec = {0};
 		XLogRecPtr	recptr;
 
 		xlrec.new_bucket = maxbucket;
@@ -1297,7 +1297,7 @@ _hash_splitbucket(Relation rel,
 	if (RelationNeedsWAL(rel))
 	{
 		XLogRecPtr	recptr;
-		xl_hash_split_complete xlrec;
+		xl_hash_split_complete xlrec = {0};
 
 		xlrec.old_bucket_flag = oopaque->hasho_flag;
 		xlrec.new_bucket_flag = nopaque->hasho_flag;

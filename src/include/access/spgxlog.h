@@ -33,17 +33,19 @@
  * need to be valid.  spgxlogState carries the required info in xlog records.
  * (See fillFakeState in spgxlog.c for more comments.)
  */
-typedef struct spgxlogState
+typedef struct PG_NO_PADDING spgxlogState
 {
 	TransactionId redirectXid;
 	bool		isBuild;
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 } spgxlogState;
 
 /*
  * Backup Blk 0: destination page for leaf tuple
  * Backup Blk 1: parent page (if any)
  */
-typedef struct spgxlogAddLeaf
+typedef struct PG_NO_PADDING spgxlogAddLeaf
 {
 	bool		newPage;		/* init dest page? */
 	bool		storesNulls;	/* page is in the nulls tree? */
@@ -61,17 +63,19 @@ typedef struct spgxlogAddLeaf
  * Backup Blk 1: destination leaf page
  * Backup Blk 2: parent page
  */
-typedef struct spgxlogMoveLeafs
+typedef struct PG_NO_PADDING spgxlogMoveLeafs
 {
 	uint16		nMoves;			/* number of tuples moved from source page */
 	bool		newPage;		/* init dest page? */
 	bool		replaceDead;	/* are we replacing a DEAD source tuple? */
 	bool		storesNulls;	/* pages are in the nulls tree? */
+	pg_padding_1(pg_pad1);
 
 	/* where the parent downlink is */
 	OffsetNumber offnumParent;
 	uint16		nodeI;
 
+	pg_padding_2(pg_pad2);
 	spgxlogState stateSrc;
 
 	/*----------
@@ -96,7 +100,7 @@ typedef struct spgxlogMoveLeafs
  * Backup Blk 2: where parent downlink is, if updated and different from
  *				 the old and new
  */
-typedef struct spgxlogAddNode
+typedef struct PG_NO_PADDING spgxlogAddNode
 {
 	/*
 	 * Offset of the original inner tuple, in the original page (on backup
@@ -127,6 +131,7 @@ typedef struct spgxlogAddNode
 
 	uint16		nodeI;
 
+	pg_padding_2(pg_pad);
 	spgxlogState stateSrc;
 
 	/*
@@ -138,7 +143,7 @@ typedef struct spgxlogAddNode
  * Backup Blk 0: where the prefix tuple goes
  * Backup Blk 1: where the postfix tuple goes (if different page)
  */
-typedef struct spgxlogSplitTuple
+typedef struct PG_NO_PADDING spgxlogSplitTuple
 {
 	/* where the prefix tuple goes */
 	OffsetNumber offnumPrefix;
@@ -162,9 +167,10 @@ typedef struct spgxlogSplitTuple
  * Backup Blk 2: Inner page
  * Backup Blk 3: Parent page (if any, and different from Inner)
  */
-typedef struct spgxlogPickSplit
+typedef struct PG_NO_PADDING spgxlogPickSplit
 {
 	bool		isRootSplit;
+	pg_padding_1(pg_pad1);
 
 	uint16		nDelete;		/* n to delete from Src */
 	uint16		nInsert;		/* n to insert on Src and/or Dest */
@@ -179,9 +185,11 @@ typedef struct spgxlogPickSplit
 
 	/* where the parent downlink is, if any */
 	bool		innerIsParent;	/* is parent the same as inner page? */
+	pg_padding_1(pg_pad2);
 	OffsetNumber offnumParent;
 	uint16		nodeI;
 
+	pg_padding_2(pg_pad3);
 	spgxlogState stateSrc;
 
 	/*----------
@@ -198,7 +206,7 @@ typedef struct spgxlogPickSplit
 
 #define SizeOfSpgxlogPickSplit offsetof(spgxlogPickSplit, offsets)
 
-typedef struct spgxlogVacuumLeaf
+typedef struct PG_NO_PADDING spgxlogVacuumLeaf
 {
 	uint16		nDead;			/* number of tuples to become DEAD */
 	uint16		nPlaceholder;	/* number of tuples to become PLACEHOLDER */
@@ -222,10 +230,11 @@ typedef struct spgxlogVacuumLeaf
 
 #define SizeOfSpgxlogVacuumLeaf offsetof(spgxlogVacuumLeaf, offsets)
 
-typedef struct spgxlogVacuumRoot
+typedef struct PG_NO_PADDING spgxlogVacuumRoot
 {
 	/* vacuum a root page when it is also a leaf */
 	uint16		nDelete;		/* number of tuples to delete */
+	pg_padding_2(pg_pad);
 
 	spgxlogState stateSrc;
 
@@ -235,13 +244,15 @@ typedef struct spgxlogVacuumRoot
 
 #define SizeOfSpgxlogVacuumRoot offsetof(spgxlogVacuumRoot, offsets)
 
-typedef struct spgxlogVacuumRedirect
+typedef struct PG_NO_PADDING spgxlogVacuumRedirect
 {
 	uint16		nToPlaceholder; /* number of redirects to make placeholders */
 	OffsetNumber firstPlaceholder;	/* first placeholder tuple to remove */
 	TransactionId snapshotConflictHorizon;	/* newest XID of removed redirects */
 	bool		isCatalogRel;	/* to handle recovery conflict during logical
 								 * decoding on standby */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 
 	/* offsets of redirect tuples to make placeholders follow */
 	OffsetNumber offsets[FLEXIBLE_ARRAY_MEMBER];

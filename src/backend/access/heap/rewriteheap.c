@@ -826,7 +826,7 @@ logical_heap_rewrite_flush_mappings(RewriteState state)
 	{
 		char	   *waldata;
 		char	   *waldata_start;
-		xl_heap_rewrite_mapping xlrec;
+		xl_heap_rewrite_mapping xlrec = {0};
 		Oid			dboid;
 		uint32		len;
 		int			written;

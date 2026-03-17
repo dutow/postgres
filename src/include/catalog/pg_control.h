@@ -32,7 +32,7 @@
  * a copy of the latest one in pg_control for possible disaster recovery.
  * Changing this struct requires a PG_CONTROL_VERSION bump.
  */
-typedef struct CheckPoint
+typedef struct PG_NO_PADDING CheckPoint
 {
 	XLogRecPtr	redo;			/* next RecPtr available when we began to
 								 * create CheckPoint (i.e. REDO start point) */
@@ -40,8 +40,13 @@ typedef struct CheckPoint
 	TimeLineID	PrevTimeLineID; /* previous TLI, if this record begins a new
 								 * timeline (equals ThisTimeLineID otherwise) */
 	bool		fullPageWrites; /* current full_page_writes */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	int			wal_level;		/* current wal_level */
 	bool		logicalDecodingEnabled; /* current logical decoding status */
+	pg_padding_1(pg_pad3);
+	pg_padding_2(pg_pad4);
+	pg_padding_4(pg_pad5);
 	FullTransactionId nextXid;	/* next free transaction ID */
 	Oid			nextOid;		/* next free OID */
 	MultiXactId nextMulti;		/* next free MultiXactId */
@@ -63,6 +68,7 @@ typedef struct CheckPoint
 	 * set to InvalidTransactionId.
 	 */
 	TransactionId oldestActiveXid;
+	pg_padding_4(pg_pad6);
 } CheckPoint;
 
 /* XLOG info values for XLOG rmgr */

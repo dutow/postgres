@@ -183,7 +183,7 @@ brin_doupdate(Relation idxrel, BlockNumber pagesPerRange,
 		/* XLOG stuff */
 		if (RelationNeedsWAL(idxrel))
 		{
-			xl_brin_samepage_update xlrec;
+			xl_brin_samepage_update xlrec = {0};
 			XLogRecPtr	recptr;
 			uint8		info = XLOG_BRIN_SAMEPAGE_UPDATE;
 
@@ -267,7 +267,7 @@ brin_doupdate(Relation idxrel, BlockNumber pagesPerRange,
 		/* XLOG stuff */
 		if (RelationNeedsWAL(idxrel))
 		{
-			xl_brin_update xlrec;
+			xl_brin_update xlrec = {0};
 			XLogRecPtr	recptr;
 			uint8		info;
 
@@ -423,7 +423,7 @@ brin_doinsert(Relation idxrel, BlockNumber pagesPerRange,
 	/* XLOG stuff */
 	if (RelationNeedsWAL(idxrel))
 	{
-		xl_brin_insert xlrec;
+		xl_brin_insert xlrec = {0};
 		XLogRecPtr	recptr;
 		uint8		info;
 

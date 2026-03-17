@@ -24,7 +24,7 @@
 
 #define XLOG_RELMAP_UPDATE		0x00
 
-typedef struct xl_relmap_update
+typedef struct PG_NO_PADDING xl_relmap_update
 {
 	Oid			dbid;			/* database ID, or 0 for shared map */
 	Oid			tsid;			/* database's tablespace, or pg_global */

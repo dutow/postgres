@@ -2307,7 +2307,7 @@ ExecuteTruncateGuts(List *explicit_rels,
 	 */
 	if (relids_logged != NIL)
 	{
-		xl_heap_truncate xlrec;
+		xl_heap_truncate xlrec = {0};
 		int			i = 0;
 
 		/* should only get here if effective_wal_level is 'logical' */

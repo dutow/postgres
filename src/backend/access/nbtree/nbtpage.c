@@ -285,7 +285,7 @@ _bt_set_cleanup_info(Relation rel, BlockNumber num_delpages)
 	/* write wal record if needed */
 	if (RelationNeedsWAL(rel))
 	{
-		xl_btree_metadata md;
+		xl_btree_metadata md = {0};
 		XLogRecPtr	recptr;
 
 		XLogBeginInsert();
@@ -472,9 +472,9 @@ _bt_getroot(Relation rel, Relation heaprel, int access)
 		/* XLOG stuff */
 		if (RelationNeedsWAL(rel))
 		{
-			xl_btree_newroot xlrec;
+			xl_btree_newroot xlrec = {0};
 			XLogRecPtr	recptr;
-			xl_btree_metadata md;
+			xl_btree_metadata md = {0};
 
 			XLogBeginInsert();
 			XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
@@ -933,7 +933,7 @@ _bt_allocbuf(Relation rel, Relation heaprel)
 				 */
 				if (RelationNeedsWAL(rel) && XLogStandbyInfoActive())
 				{
-					xl_btree_reuse_page xlrec_reuse;
+					xl_btree_reuse_page xlrec_reuse = {0};
 
 					/*
 					 * Note that we don't register the buffer with the record,
@@ -1227,7 +1227,7 @@ _bt_delitems_vacuum(Relation rel, Buffer buf,
 	if (needswal)
 	{
 		XLogRecPtr	recptr;
-		xl_btree_vacuum xlrec_vacuum;
+		xl_btree_vacuum xlrec_vacuum = {0};
 
 		xlrec_vacuum.ndeleted = ndeletable;
 		xlrec_vacuum.nupdated = nupdatable;
@@ -1343,7 +1343,7 @@ _bt_delitems_delete(Relation rel, Buffer buf,
 	if (needswal)
 	{
 		XLogRecPtr	recptr;
-		xl_btree_delete xlrec_delete;
+		xl_btree_delete xlrec_delete = {0};
 
 		xlrec_delete.snapshotConflictHorizon = snapshotConflictHorizon;
 		xlrec_delete.ndeleted = ndeletable;
@@ -1439,7 +1439,7 @@ _bt_delitems_update(BTVacuumPosting *updatable, int nupdatable,
 		{
 			BTVacuumPosting vacposting = updatable[i];
 			Size		itemsz;
-			xl_btree_update update;
+			xl_btree_update update = {0};
 
 			update.ndeletedtids = vacposting->ndeletedtids;
 			memcpy(updatedbuf + offset, &update.ndeletedtids,
@@ -2252,7 +2252,7 @@ _bt_mark_page_halfdead(Relation rel, Relation heaprel, Buffer leafbuf,
 	/* XLOG stuff */
 	if (RelationNeedsWAL(rel))
 	{
-		xl_btree_mark_page_halfdead xlrec;
+		xl_btree_mark_page_halfdead xlrec = {0};
 		XLogRecPtr	recptr;
 
 		xlrec.poffset = poffset;
@@ -2673,8 +2673,8 @@ _bt_unlink_halfdead_page(Relation rel, Buffer leafbuf, BlockNumber scanblkno,
 	/* XLOG stuff */
 	if (RelationNeedsWAL(rel))
 	{
-		xl_btree_unlink_page xlrec;
-		xl_btree_metadata xlmeta;
+		xl_btree_unlink_page xlrec = {0};
+		xl_btree_metadata xlmeta = {0};
 		uint8		xlinfo;
 		XLogRecPtr	recptr;
 

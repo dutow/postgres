@@ -26,7 +26,7 @@
  * Single WAL record for an entire CREATE DATABASE operation. This is used
  * by the FILE_COPY strategy.
  */
-typedef struct xl_dbase_create_file_copy_rec
+typedef struct PG_NO_PADDING xl_dbase_create_file_copy_rec
 {
 	Oid			db_id;
 	Oid			tablespace_id;
@@ -39,13 +39,13 @@ typedef struct xl_dbase_create_file_copy_rec
  * WAL_LOG strategy is used. Each individual block will be logged separately
  * afterward.
  */
-typedef struct xl_dbase_create_wal_log_rec
+typedef struct PG_NO_PADDING xl_dbase_create_wal_log_rec
 {
 	Oid			db_id;
 	Oid			tablespace_id;
 } xl_dbase_create_wal_log_rec;
 
-typedef struct xl_dbase_drop_rec
+typedef struct PG_NO_PADDING xl_dbase_drop_rec
 {
 	Oid			db_id;
 	int			ntablespaces;	/* number of tablespace IDs */

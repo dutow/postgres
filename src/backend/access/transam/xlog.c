@@ -5125,7 +5125,7 @@ XLOGShmemInit(void)
 void
 BootStrapXLOG(uint32 data_checksum_version)
 {
-	CheckPoint	checkPoint;
+	CheckPoint	checkPoint = {0};
 	PGAlignedXLogBlock buffer;
 	XLogPageHeader page;
 	XLogLongPageHeader longpage;
@@ -5207,6 +5207,7 @@ BootStrapXLOG(uint32 data_checksum_version)
 	/* Insert the initial checkpoint record */
 	recptr = ((char *) page + SizeOfXLogLongPHD);
 	record = (XLogRecord *) recptr;
+	memset(record, 0, SizeOfXLogRecord);
 	record->xl_prev = InvalidXLogRecPtr;
 	record->xl_xid = InvalidTransactionId;
 	record->xl_tot_len = SizeOfXLogRecord + SizeOfXLogRecordDataHeaderShort + sizeof(checkPoint);
@@ -5517,7 +5518,7 @@ void
 StartupXLOG(void)
 {
 	XLogCtlInsert *Insert;
-	CheckPoint	checkPoint;
+	CheckPoint	checkPoint = {0};
 	bool		wasShutdown;
 	bool		didCrash;
 	bool		haveTblspcMap;
@@ -7025,7 +7026,7 @@ bool
 CreateCheckPoint(int flags)
 {
 	bool		shutdown;
-	CheckPoint	checkPoint;
+	CheckPoint	checkPoint = {0};
 	XLogRecPtr	recptr;
 	XLogSegNo	_logSegNo;
 	XLogCtlInsert *Insert = &XLogCtl->Insert;
@@ -7515,7 +7516,7 @@ CreateCheckPoint(int flags)
 static void
 CreateEndOfRecoveryRecord(void)
 {
-	xl_end_of_recovery xlrec;
+	xl_end_of_recovery xlrec = {0};
 	XLogRecPtr	recptr;
 
 	/* sanity check */
@@ -7581,7 +7582,7 @@ static XLogRecPtr
 CreateOverwriteContrecordRecord(XLogRecPtr aborted_lsn, XLogRecPtr pagePtr,
 								TimeLineID newTLI)
 {
-	xl_overwrite_contrecord xlrec;
+	xl_overwrite_contrecord xlrec = {0};
 	XLogRecPtr	recptr;
 	XLogPageHeader pagehdr;
 	XLogRecPtr	startPos;
@@ -7732,7 +7733,7 @@ CreateRestartPoint(int flags)
 {
 	XLogRecPtr	lastCheckPointRecPtr;
 	XLogRecPtr	lastCheckPointEndPtr;
-	CheckPoint	lastCheckPoint;
+	CheckPoint	lastCheckPoint = {0};
 	XLogRecPtr	PriorRedoPtr;
 	XLogRecPtr	receivePtr;
 	XLogRecPtr	replayPtr;
@@ -8223,7 +8224,7 @@ XLogRecPtr
 XLogRestorePoint(const char *rpName)
 {
 	XLogRecPtr	RecPtr;
-	xl_restore_point xlrec;
+	xl_restore_point xlrec = {0};
 
 	xlrec.rp_time = GetCurrentTimestamp();
 	strlcpy(xlrec.rp_name, rpName, MAXFNAMELEN);
@@ -8265,7 +8266,7 @@ XLogReportParameters(void)
 		 */
 		if (wal_level != ControlFile->wal_level || XLogIsNeeded())
 		{
-			xl_parameter_change xlrec;
+			xl_parameter_change xlrec = {0};
 			XLogRecPtr	recptr;
 
 			xlrec.MaxConnections = MaxConnections;
@@ -8408,7 +8409,7 @@ xlog_redo(XLogReaderState *record)
 	}
 	else if (info == XLOG_CHECKPOINT_SHUTDOWN)
 	{
-		CheckPoint	checkPoint;
+		CheckPoint	checkPoint = {0};
 		TimeLineID	replayTLI;
 
 		memcpy(&checkPoint, XLogRecGetData(record), sizeof(CheckPoint));
@@ -8509,7 +8510,7 @@ xlog_redo(XLogReaderState *record)
 	}
 	else if (info == XLOG_CHECKPOINT_ONLINE)
 	{
-		CheckPoint	checkPoint;
+		CheckPoint	checkPoint = {0};
 		TimeLineID	replayTLI;
 
 		memcpy(&checkPoint, XLogRecGetData(record), sizeof(CheckPoint));
@@ -8574,7 +8575,7 @@ xlog_redo(XLogReaderState *record)
 	}
 	else if (info == XLOG_END_OF_RECOVERY)
 	{
-		xl_end_of_recovery xlrec;
+		xl_end_of_recovery xlrec = {0};
 		TimeLineID	replayTLI;
 
 		memcpy(&xlrec, XLogRecGetData(record), sizeof(xl_end_of_recovery));
@@ -8647,7 +8648,7 @@ xlog_redo(XLogReaderState *record)
 	}
 	else if (info == XLOG_PARAMETER_CHANGE)
 	{
-		xl_parameter_change xlrec;
+		xl_parameter_change xlrec = {0};
 
 		/* Update our copy of the parameters in pg_control */
 		memcpy(&xlrec, XLogRecGetData(record), sizeof(xl_parameter_change));

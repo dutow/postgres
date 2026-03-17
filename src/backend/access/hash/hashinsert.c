@@ -215,7 +215,7 @@ restart_insert:
 	/* XLOG stuff */
 	if (RelationNeedsWAL(rel))
 	{
-		xl_hash_insert xlrec;
+		xl_hash_insert xlrec = {0};
 		XLogRecPtr	recptr;
 
 		xlrec.offnum = itup_off;
@@ -423,7 +423,7 @@ _hash_vacuum_one_page(Relation rel, Relation hrel, Buffer metabuf, Buffer buf)
 		/* XLOG stuff */
 		if (RelationNeedsWAL(rel))
 		{
-			xl_hash_vacuum_one_page xlrec;
+			xl_hash_vacuum_one_page xlrec = {0};
 			XLogRecPtr	recptr;
 
 			xlrec.isCatalogRel = RelationIsAccessibleInLogicalDecoding(hrel);

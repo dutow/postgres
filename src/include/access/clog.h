@@ -29,7 +29,7 @@ typedef int XidStatus;
 #define TRANSACTION_STATUS_ABORTED			0x02
 #define TRANSACTION_STATUS_SUB_COMMITTED	0x03
 
-typedef struct xl_clog_truncate
+typedef struct PG_NO_PADDING xl_clog_truncate
 {
 	int64		pageno;
 	TransactionId oldestXact;

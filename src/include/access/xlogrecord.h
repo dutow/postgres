@@ -38,14 +38,14 @@
  * XLogRecordDataHeaderLong structs all begin with a single 'id' byte. It's
  * used to distinguish between block references, and the main data structs.
  */
-typedef struct XLogRecord
+typedef struct PG_NO_PADDING XLogRecord
 {
 	uint32		xl_tot_len;		/* total len of entire record */
 	TransactionId xl_xid;		/* xact id */
 	XLogRecPtr	xl_prev;		/* ptr to previous record in log */
 	uint8		xl_info;		/* flag bits, see below */
 	RmgrId		xl_rmid;		/* resource manager for this record */
-	/* 2 bytes of padding here, initialize to zero */
+	pg_padding_2(pg_pad);
 	pg_crc32c	xl_crc;			/* CRC for this record */
 
 	/* XLogRecordBlockHeaders and XLogRecordDataHeader follow, no padding */
@@ -100,7 +100,7 @@ typedef struct XLogRecord
  * Note that we don't attempt to align the XLogRecordBlockHeader struct!
  * So, the struct must be copied to aligned local storage before use.
  */
-typedef struct XLogRecordBlockHeader
+typedef struct PG_NO_PADDING XLogRecordBlockHeader
 {
 	uint8		id;				/* block reference ID */
 	uint8		fork_flags;		/* fork within the relation, and flags */
@@ -112,7 +112,7 @@ typedef struct XLogRecordBlockHeader
 	/* BlockNumber follows */
 } XLogRecordBlockHeader;
 
-#define SizeOfXLogRecordBlockHeader (offsetof(XLogRecordBlockHeader, data_length) + sizeof(uint16))
+#define SizeOfXLogRecordBlockHeader (sizeof(XLogRecordBlockHeader))
 
 /*
  * Additional header information when a full-page image is included
@@ -138,11 +138,12 @@ typedef struct XLogRecordBlockHeader
  * compressed, the amount of block data actually present is less than
  * BLCKSZ - the length of "hole" bytes - the length of extra information.
  */
-typedef struct XLogRecordBlockImageHeader
+typedef struct PG_NO_PADDING XLogRecordBlockImageHeader
 {
 	uint16		length;			/* number of page image bytes */
 	uint16		hole_offset;	/* number of bytes before "hole" */
 	uint8		bimg_info;		/* flag bits, see below */
+	pg_padding_1(pg_pad);
 
 	/*
 	 * If BKPIMAGE_HAS_HOLE and BKPIMAGE_COMPRESSED(), an
@@ -151,7 +152,7 @@ typedef struct XLogRecordBlockImageHeader
 } XLogRecordBlockImageHeader;
 
 #define SizeOfXLogRecordBlockImageHeader	\
-	(offsetof(XLogRecordBlockImageHeader, bimg_info) + sizeof(uint8))
+	(sizeof(XLogRecordBlockImageHeader))
 
 /* Information stored in bimg_info */
 #define BKPIMAGE_HAS_HOLE		0x01	/* page image has "hole" */
@@ -170,7 +171,7 @@ typedef struct XLogRecordBlockImageHeader
  * Extra header information used when page image has "hole" and
  * is compressed.
  */
-typedef struct XLogRecordBlockCompressHeader
+typedef struct PG_NO_PADDING XLogRecordBlockCompressHeader
 {
 	uint16		hole_length;	/* number of bytes in "hole" */
 } XLogRecordBlockCompressHeader;
@@ -210,7 +211,7 @@ typedef struct XLogRecordBlockCompressHeader
  * (These structs are currently not used in the code, they are here just for
  * documentation purposes).
  */
-typedef struct XLogRecordDataHeaderShort
+typedef struct PG_NO_PADDING XLogRecordDataHeaderShort
 {
 	uint8		id;				/* XLR_BLOCK_ID_DATA_SHORT */
 	uint8		data_length;	/* number of payload bytes */
@@ -218,7 +219,7 @@ typedef struct XLogRecordDataHeaderShort
 
 #define SizeOfXLogRecordDataHeaderShort (sizeof(uint8) * 2)
 
-typedef struct XLogRecordDataHeaderLong
+typedef struct PG_NO_PADDING XLogRecordDataHeaderLong
 {
 	uint8		id;				/* XLR_BLOCK_ID_DATA_LONG */
 	/* followed by uint32 data_length, unaligned */

@@ -110,7 +110,7 @@
 	(XLH_DELETE_CONTAINS_OLD_TUPLE | XLH_DELETE_CONTAINS_OLD_KEY)
 
 /* This is what we need to know about delete */
-typedef struct xl_heap_delete
+typedef struct PG_NO_PADDING xl_heap_delete
 {
 	TransactionId xmax;			/* xmax of the deleted tuple */
 	OffsetNumber offnum;		/* deleted tuple's offset */
@@ -118,7 +118,7 @@ typedef struct xl_heap_delete
 	uint8		flags;
 } xl_heap_delete;
 
-#define SizeOfHeapDelete	(offsetof(xl_heap_delete, flags) + sizeof(uint8))
+#define SizeOfHeapDelete	sizeof(xl_heap_delete)
 
 /*
  * xl_heap_truncate flag values, 8 bits are available.
@@ -131,11 +131,13 @@ typedef struct xl_heap_delete
  * sequence relids that need to be restarted, if any.
  * All rels are always within the same database, so we just list dbid once.
  */
-typedef struct xl_heap_truncate
+typedef struct PG_NO_PADDING xl_heap_truncate
 {
 	Oid			dbId;
 	uint32		nrelids;
 	uint8		flags;
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	Oid			relids[FLEXIBLE_ARRAY_MEMBER];
 } xl_heap_truncate;
 
@@ -147,25 +149,27 @@ typedef struct xl_heap_truncate
  * fields that are available elsewhere in the WAL record, or perhaps just
  * plain needn't be reconstructed.  These are the fields we must store.
  */
-typedef struct xl_heap_header
+typedef struct PG_NO_PADDING xl_heap_header
 {
 	uint16		t_infomask2;
 	uint16		t_infomask;
 	uint8		t_hoff;
+	pg_padding_1(pg_pad);
 } xl_heap_header;
 
-#define SizeOfHeapHeader	(offsetof(xl_heap_header, t_hoff) + sizeof(uint8))
+#define SizeOfHeapHeader	sizeof(xl_heap_header)
 
 /* This is what we need to know about insert */
-typedef struct xl_heap_insert
+typedef struct PG_NO_PADDING xl_heap_insert
 {
 	OffsetNumber offnum;		/* inserted tuple's offset */
 	uint8		flags;
+	pg_padding_1(pg_pad);
 
 	/* xl_heap_header & TUPLE DATA in backup block 0 */
 } xl_heap_insert;
 
-#define SizeOfHeapInsert	(offsetof(xl_heap_insert, flags) + sizeof(uint8))
+#define SizeOfHeapInsert	sizeof(xl_heap_insert)
 
 /*
  * This is what we need to know about a multi-insert.
@@ -178,25 +182,27 @@ typedef struct xl_heap_insert
  * followed by the tuple data for each tuple. There is padding to align
  * each xl_multi_insert_tuple struct.
  */
-typedef struct xl_heap_multi_insert
+typedef struct PG_NO_PADDING xl_heap_multi_insert
 {
 	uint8		flags;
+	pg_padding_1(pg_pad);
 	uint16		ntuples;
 	OffsetNumber offsets[FLEXIBLE_ARRAY_MEMBER];
 } xl_heap_multi_insert;
 
 #define SizeOfHeapMultiInsert	offsetof(xl_heap_multi_insert, offsets)
 
-typedef struct xl_multi_insert_tuple
+typedef struct PG_NO_PADDING xl_multi_insert_tuple
 {
 	uint16		datalen;		/* size of tuple data that follows */
 	uint16		t_infomask2;
 	uint16		t_infomask;
 	uint8		t_hoff;
+	pg_padding_1(pg_pad);
 	/* TUPLE DATA FOLLOWS AT END OF STRUCT */
 } xl_multi_insert_tuple;
 
-#define SizeOfMultiInsertTuple	(offsetof(xl_multi_insert_tuple, t_hoff) + sizeof(uint8))
+#define SizeOfMultiInsertTuple	sizeof(xl_multi_insert_tuple)
 
 /*
  * This is what we need to know about update|hot_update
@@ -215,7 +221,7 @@ typedef struct xl_multi_insert_tuple
  *
  * Backup blk 1: old page, if different. (no data, just a reference to the blk)
  */
-typedef struct xl_heap_update
+typedef struct PG_NO_PADDING xl_heap_update
 {
 	TransactionId old_xmax;		/* xmax of the old tuple */
 	OffsetNumber old_offnum;	/* old tuple's offset */
@@ -223,6 +229,7 @@ typedef struct xl_heap_update
 	uint8		flags;
 	TransactionId new_xmax;		/* xmax of the new tuple */
 	OffsetNumber new_offnum;	/* new tuple's offset */
+	pg_padding_2(pg_pad);
 
 	/*
 	 * If XLH_UPDATE_CONTAINS_OLD_TUPLE or XLH_UPDATE_CONTAINS_OLD_KEY flags
@@ -230,7 +237,7 @@ typedef struct xl_heap_update
 	 */
 } xl_heap_update;
 
-#define SizeOfHeapUpdate	(offsetof(xl_heap_update, new_offnum) + sizeof(OffsetNumber))
+#define SizeOfHeapUpdate	sizeof(xl_heap_update)
 
 /*
  * These structures and flags encode VACUUM pruning and freezing and on-access
@@ -282,7 +289,7 @@ typedef struct xl_heap_update
  * other fields require only 2-byte alignment.  This is also the reason that
  * 'frz_offsets' is stored separately from the xlhp_freeze_plan structs.
  */
-typedef struct xl_heap_prune
+typedef struct PG_NO_PADDING xl_heap_prune
 {
 	uint16		flags;
 
@@ -292,7 +299,7 @@ typedef struct xl_heap_prune
 	 */
 } xl_heap_prune;
 
-#define SizeOfHeapPrune (offsetof(xl_heap_prune, flags) + sizeof(uint16))
+#define SizeOfHeapPrune sizeof(xl_heap_prune)
 
 /* to handle recovery conflict during logical decoding on standby */
 #define		XLHP_IS_CATALOG_REL			(1 << 1)
@@ -347,12 +354,13 @@ typedef struct xl_heap_prune
 #define		XLH_FREEZE_XVAC		0x02
 #define		XLH_INVALID_XVAC	0x04
 
-typedef struct xlhp_freeze_plan
+typedef struct PG_NO_PADDING xlhp_freeze_plan
 {
 	TransactionId xmax;
 	uint16		t_infomask2;
 	uint16		t_infomask;
 	uint8		frzflags;
+	pg_padding_1(pg_pad);
 
 	/* Length of individual page offset numbers array for this plan */
 	uint16		ntuples;
@@ -370,9 +378,10 @@ typedef struct xlhp_freeze_plan
  * (As of PostgreSQL 17, XLOG_HEAP2_PRUNE_VACUUM_SCAN records replace the
  * separate XLOG_HEAP2_FREEZE_PAGE records.)
  */
-typedef struct xlhp_freeze_plans
+typedef struct PG_NO_PADDING xlhp_freeze_plans
 {
 	uint16		nplans;
+	pg_padding_2(pg_pad);
 	xlhp_freeze_plan plans[FLEXIBLE_ARRAY_MEMBER];
 } xlhp_freeze_plans;
 
@@ -383,7 +392,7 @@ typedef struct xlhp_freeze_plans
  * set.  Note that in the XLHP_HAS_REDIRECTIONS variant, there are actually 2
  * * length number of OffsetNumbers in the data.
  */
-typedef struct xlhp_prune_items
+typedef struct PG_NO_PADDING xlhp_prune_items
 {
 	uint16		ntargets;
 	OffsetNumber data[FLEXIBLE_ARRAY_MEMBER];
@@ -401,7 +410,7 @@ typedef struct xlhp_prune_items
 #define XLH_LOCK_ALL_FROZEN_CLEARED		0x01
 
 /* This is what we need to know about lock */
-typedef struct xl_heap_lock
+typedef struct PG_NO_PADDING xl_heap_lock
 {
 	TransactionId xmax;			/* might be a MultiXactId */
 	OffsetNumber offnum;		/* locked tuple's offset on page */
@@ -409,10 +418,10 @@ typedef struct xl_heap_lock
 	uint8		flags;			/* XLH_LOCK_* flag bits */
 } xl_heap_lock;
 
-#define SizeOfHeapLock	(offsetof(xl_heap_lock, flags) + sizeof(uint8))
+#define SizeOfHeapLock	sizeof(xl_heap_lock)
 
 /* This is what we need to know about locking an updated version of a row */
-typedef struct xl_heap_lock_updated
+typedef struct PG_NO_PADDING xl_heap_lock_updated
 {
 	TransactionId xmax;
 	OffsetNumber offnum;
@@ -420,23 +429,26 @@ typedef struct xl_heap_lock_updated
 	uint8		flags;
 } xl_heap_lock_updated;
 
-#define SizeOfHeapLockUpdated	(offsetof(xl_heap_lock_updated, flags) + sizeof(uint8))
+#define SizeOfHeapLockUpdated	sizeof(xl_heap_lock_updated)
 
 /* This is what we need to know about confirmation of speculative insertion */
-typedef struct xl_heap_confirm
+typedef struct PG_NO_PADDING xl_heap_confirm
 {
 	OffsetNumber offnum;		/* confirmed tuple's offset on page */
 } xl_heap_confirm;
 
-#define SizeOfHeapConfirm	(offsetof(xl_heap_confirm, offnum) + sizeof(OffsetNumber))
+#define SizeOfHeapConfirm	sizeof(xl_heap_confirm)
 
 /* This is what we need to know about in-place update */
-typedef struct xl_heap_inplace
+typedef struct PG_NO_PADDING xl_heap_inplace
 {
 	OffsetNumber offnum;		/* updated tuple's offset on page */
+	pg_padding_2(pg_pad1);
 	Oid			dbId;			/* MyDatabaseId */
 	Oid			tsId;			/* MyDatabaseTableSpace */
 	bool		relcacheInitFileInval;	/* invalidate relcache init files */
+	pg_padding_1(pg_pad2);
+	pg_padding_2(pg_pad3);
 	int			nmsgs;			/* number of shared inval msgs */
 	SharedInvalidationMessage msgs[FLEXIBLE_ARRAY_MEMBER];
 } xl_heap_inplace;
@@ -449,15 +461,17 @@ typedef struct xl_heap_inplace
  * Backup blk 0: visibility map buffer
  * Backup blk 1: heap buffer
  */
-typedef struct xl_heap_visible
+typedef struct PG_NO_PADDING xl_heap_visible
 {
 	TransactionId snapshotConflictHorizon;
 	uint8		flags;
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 } xl_heap_visible;
 
-#define SizeOfHeapVisible (offsetof(xl_heap_visible, flags) + sizeof(uint8))
+#define SizeOfHeapVisible sizeof(xl_heap_visible)
 
-typedef struct xl_heap_new_cid
+typedef struct PG_NO_PADDING xl_heap_new_cid
 {
 	/*
 	 * store toplevel xid so we don't have to merge cids from different
@@ -473,18 +487,21 @@ typedef struct xl_heap_new_cid
 	 */
 	RelFileLocator target_locator;
 	ItemPointerData target_tid;
+	pg_padding_2(pg_pad);
 } xl_heap_new_cid;
 
-#define SizeOfHeapNewCid (offsetof(xl_heap_new_cid, target_tid) + sizeof(ItemPointerData))
+#define SizeOfHeapNewCid sizeof(xl_heap_new_cid)
 
 /* logical rewrite xlog record header */
-typedef struct xl_heap_rewrite_mapping
+typedef struct PG_NO_PADDING xl_heap_rewrite_mapping
 {
 	TransactionId mapped_xid;	/* xid that might need to see the row */
 	Oid			mapped_db;		/* DbOid or InvalidOid for shared rels */
 	Oid			mapped_rel;		/* Oid of the mapped relation */
+	pg_padding_4(pg_pad1);
 	off_t		offset;			/* How far have we written so far */
 	uint32		num_mappings;	/* Number of in-memory mappings */
+	pg_padding_4(pg_pad2);
 	XLogRecPtr	start_lsn;		/* Insert LSN at begin of rewrite */
 } xl_heap_rewrite_mapping;
 

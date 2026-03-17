@@ -1319,8 +1319,8 @@ _bt_insertonpg(Relation rel,
 		/* XLOG stuff */
 		if (RelationNeedsWAL(rel))
 		{
-			xl_btree_insert xlrec;
-			xl_btree_metadata xlmeta;
+			xl_btree_insert xlrec = {0};
+			xl_btree_metadata xlmeta = {0};
 			uint8		xlinfo;
 			XLogRecPtr	recptr;
 			uint16		upostingoff;
@@ -1981,7 +1981,7 @@ _bt_split(Relation rel, Relation heaprel, BTScanInsert itup_key, Buffer buf,
 	/* XLOG stuff */
 	if (RelationNeedsWAL(rel))
 	{
-		xl_btree_split xlrec;
+		xl_btree_split xlrec = {0};
 		uint8		xlinfo;
 		XLogRecPtr	recptr;
 
@@ -2570,9 +2570,9 @@ _bt_newlevel(Relation rel, Relation heaprel, Buffer lbuf, Buffer rbuf)
 	/* XLOG stuff */
 	if (RelationNeedsWAL(rel))
 	{
-		xl_btree_newroot xlrec;
+		xl_btree_newroot xlrec = {0};
 		XLogRecPtr	recptr;
-		xl_btree_metadata md;
+		xl_btree_metadata md = {0};
 
 		xlrec.rootblk = rootblknum;
 		xlrec.level = metad->btm_level;

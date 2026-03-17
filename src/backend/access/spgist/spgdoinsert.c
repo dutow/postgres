@@ -202,7 +202,7 @@ static void
 addLeafTuple(Relation index, SpGistState *state, SpGistLeafTuple leafTuple,
 			 SPPageDesc *current, SPPageDesc *parent, bool isNulls, bool isNew)
 {
-	spgxlogAddLeaf xlrec;
+	spgxlogAddLeaf xlrec = {0};
 
 	xlrec.newPage = isNew;
 	xlrec.storesNulls = isNulls;
@@ -399,7 +399,7 @@ moveLeafs(Relation index, SpGistState *state,
 	OffsetNumber *toDelete;
 	OffsetNumber *toInsert;
 	BlockNumber nblkno;
-	spgxlogMoveLeafs xlrec;
+	spgxlogMoveLeafs xlrec = {0};
 	char	   *leafdata,
 			   *leafptr;
 
@@ -702,7 +702,7 @@ doPickSplit(Relation index, SpGistState *state,
 	int			currentFreeSpace;
 	int			totalLeafSizes;
 	bool		allTheSame;
-	spgxlogPickSplit xlrec;
+	spgxlogPickSplit xlrec = {0};
 	char	   *leafdata,
 			   *leafptr;
 	SPPageDesc	saveCurrent;
@@ -1512,7 +1512,7 @@ spgAddNodeAction(Relation index, SpGistState *state,
 				 int nodeN, Datum nodeLabel)
 {
 	SpGistInnerTuple newInnerTuple;
-	spgxlogAddNode xlrec;
+	spgxlogAddNode xlrec = {0};
 
 	/* Should not be applied to nulls */
 	Assert(!SpGistPageStoresNulls(current->page));
@@ -1719,7 +1719,7 @@ spgSplitNodeAction(Relation index, SpGistState *state,
 	BlockNumber postfixBlkno;
 	OffsetNumber postfixOffset;
 	int			i;
-	spgxlogSplitTuple xlrec;
+	spgxlogSplitTuple xlrec = {0};
 	Buffer		newBuffer = InvalidBuffer;
 
 	/* Should not be applied to nulls */

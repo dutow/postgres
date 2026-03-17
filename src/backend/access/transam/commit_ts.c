@@ -966,7 +966,7 @@ CommitTsPagePrecedes(int64 page1, int64 page2)
 static void
 WriteTruncateXlogRec(int64 pageno, TransactionId oldestXid)
 {
-	xl_commit_ts_truncate xlrec;
+	xl_commit_ts_truncate xlrec = {0};
 
 	xlrec.pageno = pageno;
 	xlrec.oldestXid = oldestXid;

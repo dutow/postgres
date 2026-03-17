@@ -399,7 +399,7 @@ fill_seq_fork_with_data(Relation rel, HeapTuple tuple, ForkNumber forkNum)
 	/* XLOG stuff */
 	if (RelationNeedsWAL(rel) || forkNum == INIT_FORKNUM)
 	{
-		xl_seq_rec	xlrec;
+		xl_seq_rec	xlrec = {0};
 		XLogRecPtr	recptr;
 
 		XLogBeginInsert();
@@ -408,7 +408,7 @@ fill_seq_fork_with_data(Relation rel, HeapTuple tuple, ForkNumber forkNum)
 		xlrec.locator = rel->rd_locator;
 
 		XLogRegisterData(&xlrec, sizeof(xl_seq_rec));
-		XLogRegisterData(tuple->t_data, tuple->t_len);
+		XLogRegisterData((char *) tuple->t_data, tuple->t_len);
 
 		recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG);
 
@@ -822,7 +822,7 @@ nextval_internal(Oid relid, bool check_permissions)
 	/* XLOG stuff */
 	if (logit && RelationNeedsWAL(seqrel))
 	{
-		xl_seq_rec	xlrec;
+		xl_seq_rec	xlrec = {0};
 		XLogRecPtr	recptr;
 
 		/*
@@ -842,7 +842,7 @@ nextval_internal(Oid relid, bool check_permissions)
 		xlrec.locator = seqrel->rd_locator;
 
 		XLogRegisterData(&xlrec, sizeof(xl_seq_rec));
-		XLogRegisterData(seqdatatuple.t_data, seqdatatuple.t_len);
+		XLogRegisterData((char *) seqdatatuple.t_data, seqdatatuple.t_len);
 
 		recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG);
 
@@ -1019,7 +1019,7 @@ SetSequence(Oid relid, int64 next, bool iscalled)
 	/* XLOG stuff */
 	if (RelationNeedsWAL(seqrel))
 	{
-		xl_seq_rec	xlrec;
+		xl_seq_rec	xlrec = {0};
 		XLogRecPtr	recptr;
 		Page		page = BufferGetPage(buf);
 
@@ -1028,7 +1028,7 @@ SetSequence(Oid relid, int64 next, bool iscalled)
 
 		xlrec.locator = seqrel->rd_locator;
 		XLogRegisterData(&xlrec, sizeof(xl_seq_rec));
-		XLogRegisterData(seqdatatuple.t_data, seqdatatuple.t_len);
+		XLogRegisterData((char *) seqdatatuple.t_data, seqdatatuple.t_len);
 
 		recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG);
 

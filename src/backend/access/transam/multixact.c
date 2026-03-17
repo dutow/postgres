@@ -657,7 +657,7 @@ MultiXactIdCreateFromMembers(int nmembers, MultiXactMember *members)
 {
 	MultiXactId multi;
 	MultiXactOffset offset;
-	xl_multixact_create xlrec;
+	xl_multixact_create xlrec = {0};
 
 	debug_elog3(DEBUG2, "Create: %s",
 				mxid_to_string(InvalidMultiXactId, nmembers, members));
@@ -728,7 +728,7 @@ MultiXactIdCreateFromMembers(int nmembers, MultiXactMember *members)
 	 */
 	XLogBeginInsert();
 	XLogRegisterData(&xlrec, SizeOfMultiXactCreate);
-	XLogRegisterData(members, nmembers * sizeof(MultiXactMember));
+	XLogRegisterData((char *) members, nmembers * sizeof(MultiXactMember));
 
 	(void) XLogInsert(RM_MULTIXACT_ID, XLOG_MULTIXACT_CREATE_ID);
 
@@ -2796,7 +2796,7 @@ WriteMTruncateXlogRec(Oid oldestMultiDB,
 					  MultiXactOffset oldestOffset)
 {
 	XLogRecPtr	recptr;
-	xl_multixact_truncate xlrec;
+	xl_multixact_truncate xlrec = {0};
 
 	xlrec.oldestMultiDB = oldestMultiDB;
 	xlrec.oldestMulti = oldestMulti;
@@ -2864,7 +2864,7 @@ multixact_redo(XLogReaderState *record)
 	}
 	else if (info == XLOG_MULTIXACT_TRUNCATE_ID)
 	{
-		xl_multixact_truncate xlrec;
+		xl_multixact_truncate xlrec = {0};
 		int64		pageno;
 
 		memcpy(&xlrec, XLogRecGetData(record),

@@ -987,7 +987,7 @@ StandbyAcquireAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid)
 {
 	RecoveryLockXidEntry *xidentry;
 	RecoveryLockEntry *lockentry;
-	xl_standby_lock key;
+	xl_standby_lock key = {0};
 	LOCKTAG		locktag;
 	bool		found;
 
@@ -1353,7 +1353,7 @@ LogStandbySnapshot(void)
 static XLogRecPtr
 LogCurrentRunningXacts(RunningTransactions CurrRunningXacts)
 {
-	xl_running_xacts xlrec;
+	xl_running_xacts xlrec = {0};
 	XLogRecPtr	recptr;
 
 	xlrec.xcnt = CurrRunningXacts->xcnt;
@@ -1413,7 +1413,7 @@ LogCurrentRunningXacts(RunningTransactions CurrRunningXacts)
 static void
 LogAccessExclusiveLocks(int nlocks, xl_standby_lock *locks)
 {
-	xl_standby_locks xlrec;
+	xl_standby_locks xlrec = {0};
 
 	xlrec.nlocks = nlocks;
 
@@ -1431,7 +1431,7 @@ LogAccessExclusiveLocks(int nlocks, xl_standby_lock *locks)
 void
 LogAccessExclusiveLock(Oid dbOid, Oid relOid)
 {
-	xl_standby_lock xlrec;
+	xl_standby_lock xlrec = {0};
 
 	xlrec.xid = GetCurrentTransactionId();
 
@@ -1471,10 +1471,8 @@ void
 LogStandbyInvalidations(int nmsgs, SharedInvalidationMessage *msgs,
 						bool relcacheInitFileInval)
 {
-	xl_invalidations xlrec;
+	xl_invalidations xlrec = {0};
 
-	/* prepare record */
-	memset(&xlrec, 0, sizeof(xlrec));
 	xlrec.dbId = MyDatabaseId;
 	xlrec.tsId = MyDatabaseTableSpace;
 	xlrec.relcacheInitFileInval = relcacheInitFileInval;
@@ -1483,7 +1481,7 @@ LogStandbyInvalidations(int nmsgs, SharedInvalidationMessage *msgs,
 	/* perform insertion */
 	XLogBeginInsert();
 	XLogRegisterData(&xlrec, MinSizeOfInvalidations);
-	XLogRegisterData(msgs,
+	XLogRegisterData((char *) msgs,
 					 nmsgs * sizeof(SharedInvalidationMessage));
 	XLogInsert(RM_STANDBY_ID, XLOG_INVALIDATIONS);
 }

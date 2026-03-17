@@ -2174,17 +2174,17 @@ log_heap_prune_and_freeze(Relation relation, Buffer buffer,
 						  OffsetNumber *dead, int ndead,
 						  OffsetNumber *unused, int nunused)
 {
-	xl_heap_prune xlrec;
+	xl_heap_prune xlrec = {0};
 	XLogRecPtr	recptr;
 	uint8		info;
 	uint8		regbuf_flags_heap;
 
 	/* The following local variables hold data registered in the WAL record: */
 	xlhp_freeze_plan plans[MaxHeapTuplesPerPage];
-	xlhp_freeze_plans freeze_plans;
-	xlhp_prune_items redirect_items;
-	xlhp_prune_items dead_items;
-	xlhp_prune_items unused_items;
+	xlhp_freeze_plans freeze_plans = {0};
+	xlhp_prune_items redirect_items = {0};
+	xlhp_prune_items dead_items = {0};
+	xlhp_prune_items unused_items = {0};
 	OffsetNumber frz_offsets[MaxHeapTuplesPerPage];
 	bool		do_prune = nredirected > 0 || ndead > 0 || nunused > 0;
 	bool		do_set_vm = vmflags & VISIBILITYMAP_VALID_BITS;

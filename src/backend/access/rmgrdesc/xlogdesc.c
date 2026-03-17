@@ -116,7 +116,7 @@ xlog_desc(StringInfo buf, XLogReaderState *record)
 	}
 	else if (info == XLOG_PARAMETER_CHANGE)
 	{
-		xl_parameter_change xlrec;
+		xl_parameter_change xlrec = {0};
 		const char *wal_level_str;
 
 		memcpy(&xlrec, rec, sizeof(xl_parameter_change));
@@ -144,7 +144,7 @@ xlog_desc(StringInfo buf, XLogReaderState *record)
 	}
 	else if (info == XLOG_END_OF_RECOVERY)
 	{
-		xl_end_of_recovery xlrec;
+		xl_end_of_recovery xlrec = {0};
 
 		memcpy(&xlrec, rec, sizeof(xl_end_of_recovery));
 		appendStringInfo(buf, "tli %u; prev tli %u; time %s; wal_level %s",
@@ -154,7 +154,7 @@ xlog_desc(StringInfo buf, XLogReaderState *record)
 	}
 	else if (info == XLOG_OVERWRITE_CONTRECORD)
 	{
-		xl_overwrite_contrecord xlrec;
+		xl_overwrite_contrecord xlrec = {0};
 
 		memcpy(&xlrec, rec, sizeof(xl_overwrite_contrecord));
 		appendStringInfo(buf, "lsn %X/%08X; time %s",

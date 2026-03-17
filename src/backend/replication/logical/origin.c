@@ -419,7 +419,7 @@ restart:
 
 			/* first make a WAL log entry */
 			{
-				xl_replorigin_drop xlrec;
+				xl_replorigin_drop xlrec = {0};
 
 				xlrec.node_id = roident;
 				XLogBeginInsert();
@@ -1008,7 +1008,7 @@ replorigin_advance(ReplOriginId node,
 	 */
 	if (wal_log)
 	{
-		xl_replorigin_set xlrec;
+		xl_replorigin_set xlrec = {0};
 
 		xlrec.remote_lsn = remote_commit;
 		xlrec.node_id = node;

@@ -1839,7 +1839,7 @@ createPostingTree(Relation index, ItemPointerData *items, uint32 nitems,
 	if (RelationNeedsWAL(index) && !is_build)
 	{
 		XLogRecPtr	recptr;
-		ginxlogCreatePostingTree data;
+		ginxlogCreatePostingTree data = {0};
 
 		data.size = rootsize;
 

@@ -86,7 +86,7 @@ typedef struct RelMapping
 	RelFileNumber mapfilenumber;	/* its rel file number */
 } RelMapping;
 
-typedef struct RelMapFile
+typedef struct PG_NO_PADDING RelMapFile
 {
 	int32		magic;			/* always RELMAPPER_FILEMAGIC */
 	int32		num_mappings;	/* number of valid RelMapping entries */
@@ -264,7 +264,7 @@ RelationMapFilenumberToOid(RelFileNumber filenumber, bool shared)
 RelFileNumber
 RelationMapOidToFilenumberForDatabase(char *dbpath, Oid relationId)
 {
-	RelMapFile	map;
+	RelMapFile	map = {0};
 	int			i;
 
 	/* Read the relmap file from the source database. */
@@ -291,7 +291,7 @@ RelationMapOidToFilenumberForDatabase(char *dbpath, Oid relationId)
 void
 RelationMapCopy(Oid dbid, Oid tsid, char *srcdbpath, char *dstdbpath)
 {
-	RelMapFile	map;
+	RelMapFile	map = {0};
 
 	/*
 	 * Read the relmap file from the source database.
@@ -958,7 +958,7 @@ write_relmap_file(RelMapFile *newmap, bool write_wal, bool send_sinval,
 
 	if (write_wal)
 	{
-		xl_relmap_update xlrec;
+		xl_relmap_update xlrec = {0};
 		XLogRecPtr	lsn;
 
 		/* now errors are fatal ... */
@@ -1038,7 +1038,7 @@ write_relmap_file(RelMapFile *newmap, bool write_wal, bool send_sinval,
 static void
 perform_relmap_update(bool shared, const RelMapFile *updates)
 {
-	RelMapFile	newmap;
+	RelMapFile	newmap = {0};
 
 	/*
 	 * Anyone updating a relation's mapping info should take exclusive lock on
@@ -1103,7 +1103,7 @@ relmap_redo(XLogReaderState *record)
 	if (info == XLOG_RELMAP_UPDATE)
 	{
 		xl_relmap_update *xlrec = (xl_relmap_update *) XLogRecGetData(record);
-		RelMapFile	newmap;
+		RelMapFile	newmap = {0};
 		char	   *dbpath;
 
 		if (xlrec->nbytes != sizeof(RelMapFile))

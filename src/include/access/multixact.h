@@ -69,17 +69,19 @@ typedef struct MultiXactMember
 #define XLOG_MULTIXACT_CREATE_ID		0x20
 #define XLOG_MULTIXACT_TRUNCATE_ID		0x30
 
-typedef struct xl_multixact_create
+typedef struct PG_NO_PADDING xl_multixact_create
 {
 	MultiXactId mid;			/* new MultiXact's ID */
+	pg_padding_4(pg_pad1);
 	MultiXactOffset moff;		/* its starting offset in members file */
 	int32		nmembers;		/* number of member XIDs */
+	pg_padding_4(pg_pad2);
 	MultiXactMember members[FLEXIBLE_ARRAY_MEMBER];
 } xl_multixact_create;
 
 #define SizeOfMultiXactCreate (offsetof(xl_multixact_create, members))
 
-typedef struct xl_multixact_truncate
+typedef struct PG_NO_PADDING xl_multixact_truncate
 {
 	Oid			oldestMultiDB;
 

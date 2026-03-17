@@ -47,12 +47,13 @@
  *
  * Backup block 0: metapage
  */
-typedef struct xl_brin_createidx
+typedef struct PG_NO_PADDING xl_brin_createidx
 {
 	BlockNumber pagesPerRange;
 	uint16		version;
+	pg_padding_2(pg_pad);
 } xl_brin_createidx;
-#define SizeOfBrinCreateIdx (offsetof(xl_brin_createidx, version) + sizeof(uint16))
+#define SizeOfBrinCreateIdx (sizeof(xl_brin_createidx))
 
 /*
  * This is what we need to know about a BRIN tuple insert
@@ -60,7 +61,7 @@ typedef struct xl_brin_createidx
  * Backup block 0: main page, block data is the new BrinTuple.
  * Backup block 1: revmap page
  */
-typedef struct xl_brin_insert
+typedef struct PG_NO_PADDING xl_brin_insert
 {
 	BlockNumber heapBlk;
 
@@ -69,9 +70,10 @@ typedef struct xl_brin_insert
 
 	/* offset number in the main page to insert the tuple to. */
 	OffsetNumber offnum;
+	pg_padding_2(pg_pad);
 } xl_brin_insert;
 
-#define SizeOfBrinInsert	(offsetof(xl_brin_insert, offnum) + sizeof(OffsetNumber))
+#define SizeOfBrinInsert	(sizeof(xl_brin_insert))
 
 /*
  * A cross-page update is the same as an insert, but also stores information
@@ -84,27 +86,28 @@ typedef struct xl_brin_insert
  * And in addition:
  * Backup block 2: old page
  */
-typedef struct xl_brin_update
+typedef struct PG_NO_PADDING xl_brin_update
 {
 	/* offset number of old tuple on old page */
 	OffsetNumber oldOffnum;
+	pg_padding_2(pg_pad);
 
 	xl_brin_insert insert;
 } xl_brin_update;
 
-#define SizeOfBrinUpdate	(offsetof(xl_brin_update, insert) + SizeOfBrinInsert)
+#define SizeOfBrinUpdate	(sizeof(xl_brin_update))
 
 /*
  * This is what we need to know about a BRIN tuple samepage update
  *
  * Backup block 0: updated page, with new BrinTuple as block data
  */
-typedef struct xl_brin_samepage_update
+typedef struct PG_NO_PADDING xl_brin_samepage_update
 {
 	OffsetNumber offnum;
 } xl_brin_samepage_update;
 
-#define SizeOfBrinSamepageUpdate		(sizeof(OffsetNumber))
+#define SizeOfBrinSamepageUpdate	(sizeof(xl_brin_samepage_update))
 
 /*
  * This is what we need to know about a revmap extension
@@ -112,7 +115,7 @@ typedef struct xl_brin_samepage_update
  * Backup block 0: metapage
  * Backup block 1: new revmap page
  */
-typedef struct xl_brin_revmap_extend
+typedef struct PG_NO_PADDING xl_brin_revmap_extend
 {
 	/*
 	 * XXX: This is actually redundant - the block number is stored as part of
@@ -121,8 +124,7 @@ typedef struct xl_brin_revmap_extend
 	BlockNumber targetBlk;
 } xl_brin_revmap_extend;
 
-#define SizeOfBrinRevmapExtend	(offsetof(xl_brin_revmap_extend, targetBlk) + \
-								 sizeof(BlockNumber))
+#define SizeOfBrinRevmapExtend	(sizeof(xl_brin_revmap_extend))
 
 /*
  * This is what we need to know about a range de-summarization
@@ -130,17 +132,17 @@ typedef struct xl_brin_revmap_extend
  * Backup block 0: revmap page
  * Backup block 1: regular page
  */
-typedef struct xl_brin_desummarize
+typedef struct PG_NO_PADDING xl_brin_desummarize
 {
 	BlockNumber pagesPerRange;
 	/* page number location to set to invalid */
 	BlockNumber heapBlk;
 	/* offset of item to delete in regular index page */
 	OffsetNumber regOffset;
+	pg_padding_2(pg_pad);
 } xl_brin_desummarize;
 
-#define SizeOfBrinDesummarize	(offsetof(xl_brin_desummarize, regOffset) + \
-								 sizeof(OffsetNumber))
+#define SizeOfBrinDesummarize	(sizeof(xl_brin_desummarize))
 
 
 extern void brin_redo(XLogReaderState *record);

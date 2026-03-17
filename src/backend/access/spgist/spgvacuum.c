@@ -127,7 +127,7 @@ vacuumLeafPage(spgBulkDeleteState *bds, Relation index, Buffer buffer,
 			   bool forPending)
 {
 	Page		page = BufferGetPage(buffer);
-	spgxlogVacuumLeaf xlrec;
+	spgxlogVacuumLeaf xlrec = {0};
 	OffsetNumber toDead[MaxIndexTuplesPerPage];
 	OffsetNumber toPlaceholder[MaxIndexTuplesPerPage];
 	OffsetNumber moveSrc[MaxIndexTuplesPerPage];
@@ -409,7 +409,7 @@ static void
 vacuumLeafRoot(spgBulkDeleteState *bds, Relation index, Buffer buffer)
 {
 	Page		page = BufferGetPage(buffer);
-	spgxlogVacuumRoot xlrec;
+	spgxlogVacuumRoot xlrec = {0};
 	OffsetNumber toDelete[MaxIndexTuplesPerPage];
 	OffsetNumber i,
 				max = PageGetMaxOffsetNumber(page);
@@ -502,7 +502,7 @@ vacuumRedirectAndPlaceholder(Relation index, Relation heaprel, Buffer buffer)
 	bool		hasUpdate = false;
 	OffsetNumber itemToPlaceholder[MaxIndexTuplesPerPage];
 	OffsetNumber itemnos[MaxIndexTuplesPerPage];
-	spgxlogVacuumRedirect xlrec;
+	spgxlogVacuumRedirect xlrec = {0};
 	GlobalVisState *vistest;
 
 	xlrec.isCatalogRel = RelationIsAccessibleInLogicalDecoding(heaprel);

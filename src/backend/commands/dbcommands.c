@@ -524,7 +524,7 @@ CreateDirAndVersionFile(char *dbpath, Oid dbid, Oid tsid, bool isRedo)
 	/* If we are not in WAL replay then write the WAL. */
 	if (!isRedo)
 	{
-		xl_dbase_create_wal_log_rec xlrec;
+		xl_dbase_create_wal_log_rec xlrec = {0};
 
 		START_CRIT_SECTION();
 
@@ -620,7 +620,7 @@ CreateDatabaseUsingFileCopy(Oid src_dboid, Oid dst_dboid, Oid src_tsid,
 
 		/* Record the filesystem change in XLOG */
 		{
-			xl_dbase_create_file_copy_rec xlrec;
+			xl_dbase_create_file_copy_rec xlrec = {0};
 
 			xlrec.db_id = dst_dboid;
 			xlrec.tablespace_id = dsttablespace;
@@ -2215,7 +2215,7 @@ movedb(const char *dbname, const char *tblspcname)
 		 * Record the filesystem change in XLOG
 		 */
 		{
-			xl_dbase_create_file_copy_rec xlrec;
+			xl_dbase_create_file_copy_rec xlrec = {0};
 
 			xlrec.db_id = db_id;
 			xlrec.tablespace_id = dst_tblspcoid;
@@ -2313,7 +2313,7 @@ movedb(const char *dbname, const char *tblspcname)
 	 * Record the filesystem change in XLOG
 	 */
 	{
-		xl_dbase_drop_rec xlrec;
+		xl_dbase_drop_rec xlrec = {0};
 
 		xlrec.db_id = db_id;
 		xlrec.ntablespaces = 1;
@@ -3072,7 +3072,7 @@ remove_dbtablespaces(Oid db_id)
 
 	/* Record the filesystem change in XLOG */
 	{
-		xl_dbase_drop_rec xlrec;
+		xl_dbase_drop_rec xlrec = {0};
 
 		xlrec.db_id = db_id;
 		xlrec.ntablespaces = ntblspc;

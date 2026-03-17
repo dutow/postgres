@@ -1431,7 +1431,7 @@ SummarizeXlogRecord(XLogReaderState *xlogreader, bool *new_fast_forward)
 	}
 	else if (info == XLOG_CHECKPOINT_SHUTDOWN)
 	{
-		CheckPoint	rec_ckpt;
+		CheckPoint	rec_ckpt = {0};
 
 		/* Extract wal_level at time record was written from payload. */
 		memcpy(&rec_ckpt, XLogRecGetData(xlogreader), sizeof(CheckPoint));
@@ -1439,7 +1439,7 @@ SummarizeXlogRecord(XLogReaderState *xlogreader, bool *new_fast_forward)
 	}
 	else if (info == XLOG_PARAMETER_CHANGE)
 	{
-		xl_parameter_change xlrec;
+		xl_parameter_change xlrec = {0};
 
 		/* Extract wal_level at time record was written from payload. */
 		memcpy(&xlrec, XLogRecGetData(xlogreader),
@@ -1448,7 +1448,7 @@ SummarizeXlogRecord(XLogReaderState *xlogreader, bool *new_fast_forward)
 	}
 	else if (info == XLOG_END_OF_RECOVERY)
 	{
-		xl_end_of_recovery xlrec;
+		xl_end_of_recovery xlrec = {0};
 
 		/* Extract wal_level at time record was written from payload. */
 		memcpy(&xlrec, XLogRecGetData(xlogreader), sizeof(xl_end_of_recovery));

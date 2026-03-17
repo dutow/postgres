@@ -77,7 +77,7 @@ spgRedoAddLeaf(XLogReaderState *record)
 	char	   *ptr = XLogRecGetData(record);
 	spgxlogAddLeaf *xldata = (spgxlogAddLeaf *) ptr;
 	char	   *leafTuple;
-	SpGistLeafTupleData leafTupleHdr;
+	SpGistLeafTupleData leafTupleHdr = {0};
 	Buffer		buffer;
 	Page		page;
 	XLogRedoAction action;
@@ -221,7 +221,7 @@ spgRedoMoveLeafs(XLogReaderState *record)
 		for (i = 0; i < nInsert; i++)
 		{
 			char	   *leafTuple;
-			SpGistLeafTupleData leafTupleHdr;
+			SpGistLeafTupleData leafTupleHdr = {0};
 
 			/*
 			 * the tuples are not aligned, so must copy to access the size
@@ -285,7 +285,7 @@ spgRedoAddNode(XLogReaderState *record)
 	char	   *ptr = XLogRecGetData(record);
 	spgxlogAddNode *xldata = (spgxlogAddNode *) ptr;
 	char	   *innerTuple;
-	SpGistInnerTupleData innerTupleHdr;
+	SpGistInnerTupleData innerTupleHdr = {0};
 	SpGistState state;
 	Buffer		buffer;
 	Page		page;
@@ -451,9 +451,9 @@ spgRedoSplitTuple(XLogReaderState *record)
 	char	   *ptr = XLogRecGetData(record);
 	spgxlogSplitTuple *xldata = (spgxlogSplitTuple *) ptr;
 	char	   *prefixTuple;
-	SpGistInnerTupleData prefixTupleHdr;
+	SpGistInnerTupleData prefixTupleHdr = {0};
 	char	   *postfixTuple;
-	SpGistInnerTupleData postfixTupleHdr;
+	SpGistInnerTupleData postfixTupleHdr = {0};
 	Buffer		buffer;
 	Page		page;
 	XLogRedoAction action;
@@ -526,7 +526,7 @@ spgRedoPickSplit(XLogReaderState *record)
 	char	   *ptr = XLogRecGetData(record);
 	spgxlogPickSplit *xldata = (spgxlogPickSplit *) ptr;
 	char	   *innerTuple;
-	SpGistInnerTupleData innerTupleHdr;
+	SpGistInnerTupleData innerTupleHdr = {0};
 	SpGistState state;
 	OffsetNumber *toDelete;
 	OffsetNumber *toInsert;
@@ -645,7 +645,7 @@ spgRedoPickSplit(XLogReaderState *record)
 	for (i = 0; i < xldata->nInsert; i++)
 	{
 		char	   *leafTuple;
-		SpGistLeafTupleData leafTupleHdr;
+		SpGistLeafTupleData leafTupleHdr = {0};
 
 		/* the tuples are not aligned, so must copy to access the size field. */
 		leafTuple = ptr;

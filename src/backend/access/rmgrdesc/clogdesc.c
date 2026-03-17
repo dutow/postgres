@@ -32,7 +32,7 @@ clog_desc(StringInfo buf, XLogReaderState *record)
 	}
 	else if (info == CLOG_TRUNCATE)
 	{
-		xl_clog_truncate xlrec;
+		xl_clog_truncate xlrec = {0};
 
 		memcpy(&xlrec, rec, sizeof(xl_clog_truncate));
 		appendStringInfo(buf, "page %" PRId64 "; oldestXact %u",

@@ -58,34 +58,40 @@
  * sent immediately when the underlying file change is made.
  */
 
-typedef struct
+typedef struct SharedInvalCatcacheMsg
 {
 	int8		id;				/* cache ID --- must be first */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	Oid			dbId;			/* database ID, or 0 if a shared relation */
 	uint32		hashValue;		/* hash value of key for this catcache */
 } SharedInvalCatcacheMsg;
 
 #define SHAREDINVALCATALOG_ID	(-1)
 
-typedef struct
+typedef struct SharedInvalCatalogMsg
 {
 	int8		id;				/* type field --- must be first */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	Oid			dbId;			/* database ID, or 0 if a shared catalog */
 	Oid			catId;			/* ID of catalog whose contents are invalid */
 } SharedInvalCatalogMsg;
 
 #define SHAREDINVALRELCACHE_ID	(-2)
 
-typedef struct
+typedef struct SharedInvalRelcacheMsg
 {
 	int8		id;				/* type field --- must be first */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	Oid			dbId;			/* database ID, or 0 if a shared relation */
 	Oid			relId;			/* relation ID, or 0 if whole relcache */
 } SharedInvalRelcacheMsg;
 
 #define SHAREDINVALSMGR_ID		(-3)
 
-typedef struct
+typedef struct SharedInvalSmgrMsg
 {
 	/* note: field layout chosen to pack into 16 bytes */
 	int8		id;				/* type field --- must be first */
@@ -96,32 +102,38 @@ typedef struct
 
 #define SHAREDINVALRELMAP_ID	(-4)
 
-typedef struct
+typedef struct SharedInvalRelmapMsg
 {
 	int8		id;				/* type field --- must be first */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	Oid			dbId;			/* database ID, or 0 for shared catalogs */
 } SharedInvalRelmapMsg;
 
 #define SHAREDINVALSNAPSHOT_ID	(-5)
 
-typedef struct
+typedef struct SharedInvalSnapshotMsg
 {
 	int8		id;				/* type field --- must be first */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	Oid			dbId;			/* database ID, or 0 if a shared relation */
 	Oid			relId;			/* relation ID */
 } SharedInvalSnapshotMsg;
 
 #define SHAREDINVALRELSYNC_ID	(-6)
 
-typedef struct
+typedef struct SharedInvalRelSyncMsg
 {
 	int8		id;				/* type field --- must be first */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 	Oid			dbId;			/* database ID */
 	Oid			relid;			/* relation ID, or 0 if whole
 								 * RelationSyncCache */
 } SharedInvalRelSyncMsg;
 
-typedef union
+typedef union SharedInvalidationMessage
 {
 	int8		id;				/* type field --- must be first */
 	SharedInvalCatcacheMsg cc;

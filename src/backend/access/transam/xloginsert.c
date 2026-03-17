@@ -584,6 +584,7 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 
 	/* The record begins with the fixed-size header */
 	rechdr = (XLogRecord *) scratch;
+	memset(rechdr, 0, SizeOfXLogRecord);
 	scratch += SizeOfXLogRecord;
 
 	hdr_rdt.next = NULL;
@@ -610,8 +611,8 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 		registered_buffer *regbuf = &registered_buffers[block_id];
 		bool		needs_backup;
 		bool		needs_data;
-		XLogRecordBlockHeader bkpb;
-		XLogRecordBlockImageHeader bimg;
+		XLogRecordBlockHeader bkpb = {0};
+		XLogRecordBlockImageHeader bimg = {0};
 		XLogRecordBlockCompressHeader cbimg = {0};
 		bool		samerel;
 		bool		is_compressed = false;

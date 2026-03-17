@@ -15,14 +15,16 @@
 #include "access/xlogreader.h"
 #include "catalog/pg_replication_origin.h"
 
-typedef struct xl_replorigin_set
+typedef struct PG_NO_PADDING xl_replorigin_set
 {
 	XLogRecPtr	remote_lsn;
 	ReplOriginId node_id;
 	bool		force;
+	pg_padding_1(pg_pad1);
+	pg_padding_4(pg_pad2);
 } xl_replorigin_set;
 
-typedef struct xl_replorigin_drop
+typedef struct PG_NO_PADDING xl_replorigin_drop
 {
 	ReplOriginId node_id;
 } xl_replorigin_drop;

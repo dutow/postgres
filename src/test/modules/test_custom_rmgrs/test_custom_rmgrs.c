@@ -29,7 +29,7 @@ PG_MODULE_MAGIC;
 /*
  * test_custom_rmgrs WAL record message.
  */
-typedef struct xl_testcustomrmgrs_message
+typedef struct PG_NO_PADDING xl_testcustomrmgrs_message
 {
 	Size		message_size;	/* size of the message */
 	char		message[FLEXIBLE_ARRAY_MEMBER]; /* payload */

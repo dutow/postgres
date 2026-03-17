@@ -246,7 +246,7 @@ _bt_dedup_pass(Relation rel, Buffer buf, IndexTuple newitem, Size newitemsz,
 	if (RelationNeedsWAL(rel))
 	{
 		XLogRecPtr	recptr;
-		xl_btree_dedup xlrec_dedup;
+		xl_btree_dedup xlrec_dedup = {0};
 
 		xlrec_dedup.nintervals = state->nintervals;
 

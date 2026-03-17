@@ -18,7 +18,7 @@
 
 #define XLOG_GIN_CREATE_PTREE  0x10
 
-typedef struct ginxlogCreatePostingTree
+typedef struct PG_NO_PADDING ginxlogCreatePostingTree
 {
 	uint32		size;
 	/* A compressed posting list follows */
@@ -34,7 +34,7 @@ typedef struct ginxlogCreatePostingTree
 
 #define XLOG_GIN_INSERT  0x20
 
-typedef struct
+typedef struct PG_NO_PADDING
 {
 	uint16		flags;			/* GIN_INSERT_ISLEAF and/or GIN_INSERT_ISDATA */
 
@@ -108,7 +108,7 @@ typedef struct
  */
 #define XLOG_GIN_SPLIT	0x30
 
-typedef struct ginxlogSplit
+typedef struct PG_NO_PADDING ginxlogSplit
 {
 	RelFileLocator locator;
 	BlockNumber rrlink;			/* right link, or root's blocknumber if root
@@ -116,6 +116,7 @@ typedef struct ginxlogSplit
 	BlockNumber leftChildBlkno; /* valid on a non-leaf split */
 	BlockNumber rightChildBlkno;
 	uint16		flags;			/* see below */
+	pg_padding_2(pg_pad);
 } ginxlogSplit;
 
 /*
@@ -152,9 +153,10 @@ typedef struct ginxlogVacuumDataLeafPage
  */
 #define XLOG_GIN_DELETE_PAGE	0x50
 
-typedef struct ginxlogDeletePage
+typedef struct PG_NO_PADDING ginxlogDeletePage
 {
 	OffsetNumber parentOffset;
+	pg_padding_2(pg_pad);
 	BlockNumber rightLink;
 	TransactionId deleteXid;	/* last Xid which could see this page in scan */
 } ginxlogDeletePage;
@@ -165,15 +167,17 @@ typedef struct ginxlogDeletePage
  * Backup Blk 0: metapage
  * Backup Blk 1: tail page
  */
-typedef struct ginxlogUpdateMeta
+typedef struct PG_NO_PADDING ginxlogUpdateMeta
 {
 	RelFileLocator locator;
+	pg_padding_4(pg_pad1);
 	GinMetaPageData metadata;
 	BlockNumber prevTail;
 	BlockNumber newRightlink;
 	int32		ntuples;		/* if ntuples > 0 then metadata.tail was
 								 * updated with that many tuples; else new sub
 								 * list was inserted */
+	pg_padding_4(pg_pad2);
 	/* array of inserted tuples follows */
 } ginxlogUpdateMeta;
 
@@ -182,7 +186,7 @@ typedef struct ginxlogUpdateMeta
 /*
  * Backup Blk 0: list page with inserted tuples
  */
-typedef struct ginxlogInsertListPage
+typedef struct PG_NO_PADDING ginxlogInsertListPage
 {
 	BlockNumber rightlink;
 	int32		ntuples;
@@ -203,10 +207,11 @@ typedef struct ginxlogInsertListPage
  * metapage.)
  */
 #define GIN_NDELETE_AT_ONCE Min(16, XLR_MAX_BLOCK_ID - 1)
-typedef struct ginxlogDeleteListPages
+typedef struct PG_NO_PADDING ginxlogDeleteListPages
 {
 	GinMetaPageData metadata;
 	int32		ndeleted;
+	pg_padding_4(pg_pad);
 } ginxlogDeleteListPages;
 
 extern void gin_redo(XLogReaderState *record);

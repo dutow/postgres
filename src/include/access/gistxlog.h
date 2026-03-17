@@ -33,7 +33,7 @@
  * Backup Blk 1: If this operation completes a page split, by inserting a
  *				 downlink for the split page, the left half of the split
  */
-typedef struct gistxlogPageUpdate
+typedef struct PG_NO_PADDING gistxlogPageUpdate
 {
 	/* number of deleted offsets */
 	uint16		ntodelete;
@@ -47,12 +47,13 @@ typedef struct gistxlogPageUpdate
 /*
  * Backup Blk 0: Leaf page, whose index tuples are deleted.
  */
-typedef struct gistxlogDelete
+typedef struct PG_NO_PADDING gistxlogDelete
 {
 	TransactionId snapshotConflictHorizon;
 	uint16		ntodelete;		/* number of deleted offsets */
 	bool		isCatalogRel;	/* to handle recovery conflict during logical
 								 * decoding on standby */
+	pg_padding_1(pg_pad);
 
 	/* TODELETE OFFSET NUMBERS */
 	OffsetNumber offsets[FLEXIBLE_ARRAY_MEMBER];
@@ -65,14 +66,18 @@ typedef struct gistxlogDelete
  *				 downlink for the split page, the left half of the split
  * Backup Blk 1 - npage: split pages (1 is the original page)
  */
-typedef struct gistxlogPageSplit
+typedef struct PG_NO_PADDING gistxlogPageSplit
 {
 	BlockNumber origrlink;		/* rightlink of the page before split */
+	pg_padding_4(pg_pad1);
 	GistNSN		orignsn;		/* NSN of the page before split */
 	bool		origleaf;		/* was split page a leaf page? */
+	pg_padding_1(pg_pad2);
 
 	uint16		npage;			/* # of pages in the split */
 	bool		markfollowright;	/* set F_FOLLOW_RIGHT flags */
+	pg_padding_1(pg_pad3);
+	pg_padding_2(pg_pad4);
 
 	/*
 	 * follow: 1. gistxlogPage and array of IndexTupleData per page
@@ -83,29 +88,34 @@ typedef struct gistxlogPageSplit
  * Backup Blk 0: page that was deleted.
  * Backup Blk 1: parent page, containing the downlink to the deleted page.
  */
-typedef struct gistxlogPageDelete
+typedef struct PG_NO_PADDING gistxlogPageDelete
 {
 	FullTransactionId deleteXid;	/* last Xid which could see page in scan */
 	OffsetNumber downlinkOffset;	/* Offset of downlink referencing this
 									 * page */
+	pg_padding_2(pg_pad1);
+	pg_padding_4(pg_pad2);
 } gistxlogPageDelete;
 
-#define SizeOfGistxlogPageDelete	(offsetof(gistxlogPageDelete, downlinkOffset) + sizeof(OffsetNumber))
+#define SizeOfGistxlogPageDelete	(sizeof(gistxlogPageDelete))
 
 
 /*
  * This is what we need to know about page reuse, for hot standby.
  */
-typedef struct gistxlogPageReuse
+typedef struct PG_NO_PADDING gistxlogPageReuse
 {
 	RelFileLocator locator;
 	BlockNumber block;
 	FullTransactionId snapshotConflictHorizon;
 	bool		isCatalogRel;	/* to handle recovery conflict during logical
 								 * decoding on standby */
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
+	pg_padding_4(pg_pad4);
 } gistxlogPageReuse;
 
-#define SizeOfGistxlogPageReuse	(offsetof(gistxlogPageReuse, isCatalogRel) + sizeof(bool))
+#define SizeOfGistxlogPageReuse	(sizeof(gistxlogPageReuse))
 
 extern void gist_redo(XLogReaderState *record);
 extern void gist_desc(StringInfo buf, XLogReaderState *record);

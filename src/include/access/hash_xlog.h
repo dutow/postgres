@@ -59,12 +59,12 @@
  * Backup Blk 0: original page (data contains the inserted tuple)
  * Backup Blk 1: metapage (HashMetaPageData)
  */
-typedef struct xl_hash_insert
+typedef struct PG_NO_PADDING xl_hash_insert
 {
 	OffsetNumber offnum;
 } xl_hash_insert;
 
-#define SizeOfHashInsert	(offsetof(xl_hash_insert, offnum) + sizeof(OffsetNumber))
+#define SizeOfHashInsert	(sizeof(xl_hash_insert))
 
 /*
  * This is what we need to know about addition of overflow page.
@@ -77,14 +77,14 @@ typedef struct xl_hash_insert
  * Backup Blk 3: new bitmap page
  * Backup Blk 4: metapage
  */
-typedef struct xl_hash_add_ovfl_page
+typedef struct PG_NO_PADDING xl_hash_add_ovfl_page
 {
 	uint16		bmsize;
 	bool		bmpage_found;
+	pg_padding_1(pg_pad);
 } xl_hash_add_ovfl_page;
 
-#define SizeOfHashAddOvflPage	\
-	(offsetof(xl_hash_add_ovfl_page, bmpage_found) + sizeof(bool))
+#define SizeOfHashAddOvflPage	(sizeof(xl_hash_add_ovfl_page))
 
 /*
  * This is what we need to know about allocating a page for split.
@@ -95,16 +95,17 @@ typedef struct xl_hash_add_ovfl_page
  * Backup Blk 1: page for new bucket
  * Backup Blk 2: metapage
  */
-typedef struct xl_hash_split_allocate_page
+typedef struct PG_NO_PADDING xl_hash_split_allocate_page
 {
 	uint32		new_bucket;
 	uint16		old_bucket_flag;
 	uint16		new_bucket_flag;
 	uint8		flags;
+	pg_padding_1(pg_pad1);
+	pg_padding_2(pg_pad2);
 } xl_hash_split_allocate_page;
 
-#define SizeOfHashSplitAllocPage	\
-	(offsetof(xl_hash_split_allocate_page, flags) + sizeof(uint8))
+#define SizeOfHashSplitAllocPage	(sizeof(xl_hash_split_allocate_page))
 
 /*
  * This is what we need to know about completing the split operation.
@@ -114,14 +115,13 @@ typedef struct xl_hash_split_allocate_page
  * Backup Blk 0: page for old bucket
  * Backup Blk 1: page for new bucket
  */
-typedef struct xl_hash_split_complete
+typedef struct PG_NO_PADDING xl_hash_split_complete
 {
 	uint16		old_bucket_flag;
 	uint16		new_bucket_flag;
 } xl_hash_split_complete;
 
-#define SizeOfHashSplitComplete \
-	(offsetof(xl_hash_split_complete, new_bucket_flag) + sizeof(uint16))
+#define SizeOfHashSplitComplete	(sizeof(xl_hash_split_complete))
 
 /*
  * This is what we need to know about move page contents required during
@@ -133,16 +133,16 @@ typedef struct xl_hash_split_complete
  * Backup Blk 1: page containing moved tuples
  * Backup Blk 2: page from which tuples will be removed
  */
-typedef struct xl_hash_move_page_contents
+typedef struct PG_NO_PADDING xl_hash_move_page_contents
 {
 	uint16		ntups;
 	bool		is_prim_bucket_same_wrt;	/* true if the page to which
 											 * tuples are moved is same as
 											 * primary bucket page */
+	pg_padding_1(pg_pad);
 } xl_hash_move_page_contents;
 
-#define SizeOfHashMovePageContents	\
-	(offsetof(xl_hash_move_page_contents, is_prim_bucket_same_wrt) + sizeof(bool))
+#define SizeOfHashMovePageContents	(sizeof(xl_hash_move_page_contents))
 
 /*
  * This is what we need to know about the squeeze page operation.
@@ -157,7 +157,7 @@ typedef struct xl_hash_move_page_contents
  * Backup Blk 5: bitmap page containing info of freed overflow page
  * Backup Blk 6: meta page
  */
-typedef struct xl_hash_squeeze_page
+typedef struct PG_NO_PADDING xl_hash_squeeze_page
 {
 	BlockNumber prevblkno;
 	BlockNumber nextblkno;
@@ -171,8 +171,7 @@ typedef struct xl_hash_squeeze_page
 											 * page */
 } xl_hash_squeeze_page;
 
-#define SizeOfHashSqueezePage	\
-	(offsetof(xl_hash_squeeze_page, is_prev_bucket_same_wrt) + sizeof(bool))
+#define SizeOfHashSqueezePage	(sizeof(xl_hash_squeeze_page))
 
 /*
  * This is what we need to know about the deletion of index tuples from a page.
@@ -182,7 +181,7 @@ typedef struct xl_hash_squeeze_page
  * Backup Blk 0: primary bucket page
  * Backup Blk 1: page from which tuples are deleted
  */
-typedef struct xl_hash_delete
+typedef struct PG_NO_PADDING xl_hash_delete
 {
 	bool		clear_dead_marking; /* true if this operation clears
 									 * LH_PAGE_HAS_DEAD_TUPLES flag */
@@ -190,7 +189,7 @@ typedef struct xl_hash_delete
 										 * primary bucket page */
 } xl_hash_delete;
 
-#define SizeOfHashDelete	(offsetof(xl_hash_delete, is_primary_bucket_page) + sizeof(bool))
+#define SizeOfHashDelete	(sizeof(xl_hash_delete))
 
 /*
  * This is what we need for metapage update operation.
@@ -199,13 +198,12 @@ typedef struct xl_hash_delete
  *
  * Backup Blk 0: meta page
  */
-typedef struct xl_hash_update_meta_page
+typedef struct PG_NO_PADDING xl_hash_update_meta_page
 {
 	double		ntuples;
 } xl_hash_update_meta_page;
 
-#define SizeOfHashUpdateMetaPage	\
-	(offsetof(xl_hash_update_meta_page, ntuples) + sizeof(double))
+#define SizeOfHashUpdateMetaPage	(sizeof(xl_hash_update_meta_page))
 
 /*
  * This is what we need to initialize metapage.
@@ -214,15 +212,15 @@ typedef struct xl_hash_update_meta_page
  *
  * Backup Blk 0: meta page
  */
-typedef struct xl_hash_init_meta_page
+typedef struct PG_NO_PADDING xl_hash_init_meta_page
 {
 	double		num_tuples;
 	RegProcedure procid;
 	uint16		ffactor;
+	pg_padding_2(pg_pad);
 } xl_hash_init_meta_page;
 
-#define SizeOfHashInitMetaPage		\
-	(offsetof(xl_hash_init_meta_page, ffactor) + sizeof(uint16))
+#define SizeOfHashInitMetaPage	(sizeof(xl_hash_init_meta_page))
 
 /*
  * This is what we need to initialize bitmap page.
@@ -232,13 +230,12 @@ typedef struct xl_hash_init_meta_page
  * Backup Blk 0: bitmap page
  * Backup Blk 1: meta page
  */
-typedef struct xl_hash_init_bitmap_page
+typedef struct PG_NO_PADDING xl_hash_init_bitmap_page
 {
 	uint16		bmsize;
 } xl_hash_init_bitmap_page;
 
-#define SizeOfHashInitBitmapPage	\
-	(offsetof(xl_hash_init_bitmap_page, bmsize) + sizeof(uint16))
+#define SizeOfHashInitBitmapPage	(sizeof(xl_hash_init_bitmap_page))
 
 /*
  * This is what we need for index tuple deletion and to
@@ -249,12 +246,13 @@ typedef struct xl_hash_init_bitmap_page
  * Backup Blk 0: primary bucket page
  * Backup Blk 1: meta page
  */
-typedef struct xl_hash_vacuum_one_page
+typedef struct PG_NO_PADDING xl_hash_vacuum_one_page
 {
 	TransactionId snapshotConflictHorizon;
 	uint16		ntuples;
 	bool		isCatalogRel;	/* to handle recovery conflict during logical
 								 * decoding on standby */
+	pg_padding_1(pg_pad);
 
 	/* TARGET OFFSET NUMBERS */
 	OffsetNumber offsets[FLEXIBLE_ARRAY_MEMBER];
