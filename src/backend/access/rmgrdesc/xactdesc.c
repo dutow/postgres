@@ -140,7 +140,7 @@ ParseCommitRecord(uint8 info, xl_xact_commit *xlrec, xl_xact_parsed_commit *pars
 void
 ParseAbortRecord(uint8 info, xl_xact_abort *xlrec, xl_xact_parsed_abort *parsed)
 {
-	char	   *data = ((char *) xlrec) + MinSizeOfXactAbort;
+	char	   *data = ((char *) xlrec) + sizeof(xl_xact_abort);
 
 	memset(parsed, 0, sizeof(*parsed));
 

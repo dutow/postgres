@@ -278,7 +278,7 @@ heap2_desc(StringInfo buf, XLogReaderState *record)
 		{
 			TransactionId conflict_xid;
 
-			memcpy(&conflict_xid, rec + SizeOfHeapPrune, sizeof(TransactionId));
+			memcpy(&conflict_xid, rec + sizeof(xl_heap_prune), sizeof(TransactionId));
 
 			appendStringInfo(buf, "snapshotConflictHorizon: %u",
 							 conflict_xid);

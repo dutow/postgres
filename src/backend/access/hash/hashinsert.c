@@ -221,7 +221,7 @@ restart_insert:
 		xlrec.offnum = itup_off;
 
 		XLogBeginInsert();
-		XLogRegisterData(&xlrec, SizeOfHashInsert);
+		XLogRegisterData(&xlrec, sizeof(xl_hash_insert));
 
 		XLogRegisterBuffer(1, metabuf, REGBUF_STANDARD);
 

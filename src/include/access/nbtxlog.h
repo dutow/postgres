@@ -86,7 +86,6 @@ typedef struct PG_NO_PADDING xl_btree_insert
 	/* NEW TUPLE ALWAYS FOLLOWS AT THE END */
 } xl_btree_insert;
 
-#define SizeOfBtreeInsert	sizeof(xl_btree_insert)
 
 /*
  * On insert with split, we save all the items going into the right sibling
@@ -161,7 +160,6 @@ typedef struct PG_NO_PADDING xl_btree_split
 	pg_padding_2(pg_pad);
 } xl_btree_split;
 
-#define SizeOfBtreeSplit	sizeof(xl_btree_split)
 
 /*
  * When page is deduplicated, consecutive groups of tuples with equal keys are
@@ -177,7 +175,6 @@ typedef struct PG_NO_PADDING xl_btree_dedup
 	/* DEDUPLICATION INTERVALS FOLLOW */
 } xl_btree_dedup;
 
-#define SizeOfBtreeDedup	sizeof(xl_btree_dedup)
 
 /*
  * This is what we need to know about page reuse within btree.  This record
@@ -198,7 +195,6 @@ typedef struct PG_NO_PADDING xl_btree_reuse_page
 	pg_padding_4(pg_pad4);
 } xl_btree_reuse_page;
 
-#define SizeOfBtreeReusePage	sizeof(xl_btree_reuse_page)
 
 /*
  * xl_btree_vacuum and xl_btree_delete records describe deletion of index
@@ -240,7 +236,6 @@ typedef struct PG_NO_PADDING xl_btree_vacuum
 	 */
 } xl_btree_vacuum;
 
-#define SizeOfBtreeVacuum	sizeof(xl_btree_vacuum)
 
 typedef struct PG_NO_PADDING xl_btree_delete
 {
@@ -261,7 +256,6 @@ typedef struct PG_NO_PADDING xl_btree_delete
 	 */
 } xl_btree_delete;
 
-#define SizeOfBtreeDelete	sizeof(xl_btree_delete)
 
 /*
  * The offsets that appear in xl_btree_update metadata are offsets into the
@@ -276,7 +270,6 @@ typedef struct PG_NO_PADDING xl_btree_update
 	/* POSTING LIST uint16 OFFSETS TO A DELETED TID FOLLOW */
 } xl_btree_update;
 
-#define SizeOfBtreeUpdate	sizeof(xl_btree_update)
 
 /*
  * This is what we need to know about marking an empty subtree for deletion.
@@ -300,7 +293,6 @@ typedef struct PG_NO_PADDING xl_btree_mark_page_halfdead
 	BlockNumber topparent;		/* topmost internal page in the subtree */
 } xl_btree_mark_page_halfdead;
 
-#define SizeOfBtreeMarkPageHalfDead sizeof(xl_btree_mark_page_halfdead)
 
 /*
  * This is what we need to know about deletion of a btree page.  Note that we
@@ -339,7 +331,6 @@ typedef struct PG_NO_PADDING xl_btree_unlink_page
 	/* xl_btree_metadata FOLLOWS IF XLOG_BTREE_UNLINK_PAGE_META */
 } xl_btree_unlink_page;
 
-#define SizeOfBtreeUnlinkPage	sizeof(xl_btree_unlink_page)
 
 /*
  * New root log record.  There are zero tuples if this is to establish an
@@ -358,7 +349,6 @@ typedef struct PG_NO_PADDING xl_btree_newroot
 	uint32		level;			/* its tree level */
 } xl_btree_newroot;
 
-#define SizeOfBtreeNewroot	sizeof(xl_btree_newroot)
 
 
 /*

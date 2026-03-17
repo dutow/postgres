@@ -53,7 +53,6 @@ typedef struct PG_NO_PADDING xl_commit_ts_truncate
 	pg_padding_4(pg_pad);
 } xl_commit_ts_truncate;
 
-#define SizeOfCommitTsTruncate	(sizeof(xl_commit_ts_truncate))
 
 extern void commit_ts_redo(XLogReaderState *record);
 extern void commit_ts_desc(StringInfo buf, XLogReaderState *record);

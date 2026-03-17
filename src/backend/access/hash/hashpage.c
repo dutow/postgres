@@ -394,7 +394,7 @@ _hash_init(Relation rel, double num_tuples, ForkNumber forkNum)
 		xlrec.ffactor = metap->hashm_ffactor;
 
 		XLogBeginInsert();
-		XLogRegisterData(&xlrec, SizeOfHashInitMetaPage);
+		XLogRegisterData(&xlrec, sizeof(xl_hash_init_meta_page));
 		XLogRegisterBuffer(0, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
 
 		recptr = XLogInsert(RM_HASH_ID, XLOG_HASH_INIT_META_PAGE);
@@ -468,7 +468,7 @@ _hash_init(Relation rel, double num_tuples, ForkNumber forkNum)
 		xlrec.bmsize = metap->hashm_bmsize;
 
 		XLogBeginInsert();
-		XLogRegisterData(&xlrec, SizeOfHashInitBitmapPage);
+		XLogRegisterData(&xlrec, sizeof(xl_hash_init_bitmap_page));
 		XLogRegisterBuffer(0, bitmapbuf, REGBUF_WILL_INIT);
 
 		/*
@@ -930,7 +930,7 @@ restart_expand:
 								sizeof(uint32));
 		}
 
-		XLogRegisterData(&xlrec, SizeOfHashSplitAllocPage);
+		XLogRegisterData(&xlrec, sizeof(xl_hash_split_allocate_page));
 
 		recptr = XLogInsert(RM_HASH_ID, XLOG_HASH_SPLIT_ALLOCATE_PAGE);
 
@@ -1304,7 +1304,7 @@ _hash_splitbucket(Relation rel,
 
 		XLogBeginInsert();
 
-		XLogRegisterData(&xlrec, SizeOfHashSplitComplete);
+		XLogRegisterData(&xlrec, sizeof(xl_hash_split_complete));
 
 		XLogRegisterBuffer(0, bucket_obuf, REGBUF_STANDARD);
 		XLogRegisterBuffer(1, bucket_nbuf, REGBUF_STANDARD);

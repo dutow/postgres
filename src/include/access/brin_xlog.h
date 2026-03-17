@@ -53,7 +53,6 @@ typedef struct PG_NO_PADDING xl_brin_createidx
 	uint16		version;
 	pg_padding_2(pg_pad);
 } xl_brin_createidx;
-#define SizeOfBrinCreateIdx (sizeof(xl_brin_createidx))
 
 /*
  * This is what we need to know about a BRIN tuple insert
@@ -73,7 +72,6 @@ typedef struct PG_NO_PADDING xl_brin_insert
 	pg_padding_2(pg_pad);
 } xl_brin_insert;
 
-#define SizeOfBrinInsert	(sizeof(xl_brin_insert))
 
 /*
  * A cross-page update is the same as an insert, but also stores information
@@ -95,7 +93,6 @@ typedef struct PG_NO_PADDING xl_brin_update
 	xl_brin_insert insert;
 } xl_brin_update;
 
-#define SizeOfBrinUpdate	(sizeof(xl_brin_update))
 
 /*
  * This is what we need to know about a BRIN tuple samepage update
@@ -107,7 +104,6 @@ typedef struct PG_NO_PADDING xl_brin_samepage_update
 	OffsetNumber offnum;
 } xl_brin_samepage_update;
 
-#define SizeOfBrinSamepageUpdate	(sizeof(xl_brin_samepage_update))
 
 /*
  * This is what we need to know about a revmap extension
@@ -124,7 +120,6 @@ typedef struct PG_NO_PADDING xl_brin_revmap_extend
 	BlockNumber targetBlk;
 } xl_brin_revmap_extend;
 
-#define SizeOfBrinRevmapExtend	(sizeof(xl_brin_revmap_extend))
 
 /*
  * This is what we need to know about a range de-summarization
@@ -142,7 +137,6 @@ typedef struct PG_NO_PADDING xl_brin_desummarize
 	pg_padding_2(pg_pad);
 } xl_brin_desummarize;
 
-#define SizeOfBrinDesummarize	(sizeof(xl_brin_desummarize))
 
 
 extern void brin_redo(XLogReaderState *record);

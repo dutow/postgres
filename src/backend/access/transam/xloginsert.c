@@ -838,8 +838,8 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 		prev_regbuf = regbuf;
 
 		/* Ok, copy the header to the scratch buffer */
-		memcpy(scratch, &bkpb, SizeOfXLogRecordBlockHeader);
-		scratch += SizeOfXLogRecordBlockHeader;
+		memcpy(scratch, &bkpb, sizeof(XLogRecordBlockHeader));
+		scratch += sizeof(XLogRecordBlockHeader);
 		if (include_image)
 		{
 			memcpy(scratch, &bimg, SizeOfXLogRecordBlockImageHeader);

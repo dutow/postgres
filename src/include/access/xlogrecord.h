@@ -112,7 +112,6 @@ typedef struct PG_NO_PADDING XLogRecordBlockHeader
 	/* BlockNumber follows */
 } XLogRecordBlockHeader;
 
-#define SizeOfXLogRecordBlockHeader (sizeof(XLogRecordBlockHeader))
 
 /*
  * Additional header information when a full-page image is included
@@ -184,7 +183,7 @@ typedef struct PG_NO_PADDING XLogRecordBlockCompressHeader
  * temporary buffer for constructing the header.
  */
 #define MaxSizeOfXLogRecordBlockHeader \
-	(SizeOfXLogRecordBlockHeader + \
+	(sizeof(XLogRecordBlockHeader) + \
 	 SizeOfXLogRecordBlockImageHeader + \
 	 SizeOfXLogRecordBlockCompressHeader + \
 	 sizeof(RelFileLocator) + \

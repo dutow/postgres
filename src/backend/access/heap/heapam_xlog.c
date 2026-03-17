@@ -40,8 +40,8 @@ heap_xlog_prune_freeze(XLogReaderState *record)
 	Size		freespace = 0;
 
 	XLogRecGetBlockTag(record, 0, &rlocator, NULL, &blkno);
-	memcpy(&xlrec, maindataptr, SizeOfHeapPrune);
-	maindataptr += SizeOfHeapPrune;
+	memcpy(&xlrec, maindataptr, sizeof(xl_heap_prune));
+	maindataptr += sizeof(xl_heap_prune);
 
 	/*
 	 * We will take an ordinary exclusive lock or a cleanup lock depending on
@@ -559,10 +559,10 @@ heap_xlog_insert(XLogReaderState *record)
 
 		data = XLogRecGetBlockData(record, 0, &datalen);
 
-		newlen = datalen - SizeOfHeapHeader;
-		Assert(datalen > SizeOfHeapHeader && newlen <= MaxHeapTupleSize);
-		memcpy(&xlhdr, data, SizeOfHeapHeader);
-		data += SizeOfHeapHeader;
+		newlen = datalen - sizeof(xl_heap_header);
+		Assert(datalen > sizeof(xl_heap_header) && newlen <= MaxHeapTupleSize);
+		memcpy(&xlhdr, data, sizeof(xl_heap_header));
+		data += sizeof(xl_heap_header);
 
 		htup = &tbuf.hdr;
 		MemSet(htup, 0, SizeofHeapTupleHeader);
@@ -697,7 +697,7 @@ heap_xlog_multi_insert(XLogReaderState *record)
 				elog(PANIC, "invalid max offset number");
 
 			xlhdr = (xl_multi_insert_tuple *) SHORTALIGN(tupdata);
-			tupdata = ((char *) xlhdr) + SizeOfMultiInsertTuple;
+			tupdata = ((char *) xlhdr) + sizeof(xl_multi_insert_tuple);
 
 			newlen = xlhdr->datalen;
 			Assert(newlen <= MaxHeapTupleSize);
@@ -978,8 +978,8 @@ heap_xlog_update(XLogReaderState *record, bool hot_update)
 			recdata += sizeof(uint16);
 		}
 
-		memcpy(&xlhdr, recdata, SizeOfHeapHeader);
-		recdata += SizeOfHeapHeader;
+		memcpy(&xlhdr, recdata, sizeof(xl_heap_header));
+		recdata += sizeof(xl_heap_header);
 
 		tuplen = recdata_end - recdata;
 		Assert(tuplen <= MaxHeapTupleSize);

@@ -388,7 +388,7 @@ found:
 		xlrec.bmsize = metap->hashm_bmsize;
 
 		XLogBeginInsert();
-		XLogRegisterData(&xlrec, SizeOfHashAddOvflPage);
+		XLogRegisterData(&xlrec, sizeof(xl_hash_add_ovfl_page));
 
 		XLogRegisterBuffer(0, ovflbuf, REGBUF_WILL_INIT);
 		XLogRegisterBufData(0, &pageopaque->hasho_bucket, sizeof(Bucket));
@@ -656,7 +656,7 @@ _hash_freeovflpage(Relation rel, Buffer bucketbuf, Buffer ovflbuf,
 		xlrec.is_prev_bucket_same_wrt = (wbuf == prevbuf);
 
 		XLogBeginInsert();
-		XLogRegisterData(&xlrec, SizeOfHashSqueezePage);
+		XLogRegisterData(&xlrec, sizeof(xl_hash_squeeze_page));
 
 		/*
 		 * bucket buffer was not changed, but still needs to be registered to
@@ -993,7 +993,7 @@ readpage:
 						xlrec.is_prim_bucket_same_wrt = (wbuf == bucket_buf);
 
 						XLogBeginInsert();
-						XLogRegisterData(&xlrec, SizeOfHashMovePageContents);
+						XLogRegisterData(&xlrec, sizeof(xl_hash_move_page_contents));
 
 						/*
 						 * bucket buffer was not changed, but still needs to

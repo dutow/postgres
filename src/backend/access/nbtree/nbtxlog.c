@@ -562,7 +562,7 @@ btree_xlog_updates(Page page, OffsetNumber *updatedoffsets,
 		vacposting->itup = origtuple;
 		vacposting->ndeletedtids = updates->ndeletedtids;
 		memcpy(vacposting->deletetids,
-			   (char *) updates + SizeOfBtreeUpdate,
+			   (char *) updates + sizeof(xl_btree_update),
 			   updates->ndeletedtids * sizeof(uint16));
 
 		_bt_update_posting(vacposting);
@@ -577,7 +577,7 @@ btree_xlog_updates(Page page, OffsetNumber *updatedoffsets,
 
 		/* advance to next xl_btree_update from array */
 		updates = (xl_btree_update *)
-			((char *) updates + SizeOfBtreeUpdate +
+			((char *) updates + sizeof(xl_btree_update) +
 			 updates->ndeletedtids * sizeof(uint16));
 	}
 }

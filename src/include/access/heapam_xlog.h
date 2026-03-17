@@ -118,7 +118,6 @@ typedef struct PG_NO_PADDING xl_heap_delete
 	uint8		flags;
 } xl_heap_delete;
 
-#define SizeOfHeapDelete	sizeof(xl_heap_delete)
 
 /*
  * xl_heap_truncate flag values, 8 bits are available.
@@ -157,7 +156,6 @@ typedef struct PG_NO_PADDING xl_heap_header
 	pg_padding_1(pg_pad);
 } xl_heap_header;
 
-#define SizeOfHeapHeader	sizeof(xl_heap_header)
 
 /* This is what we need to know about insert */
 typedef struct PG_NO_PADDING xl_heap_insert
@@ -169,7 +167,6 @@ typedef struct PG_NO_PADDING xl_heap_insert
 	/* xl_heap_header & TUPLE DATA in backup block 0 */
 } xl_heap_insert;
 
-#define SizeOfHeapInsert	sizeof(xl_heap_insert)
 
 /*
  * This is what we need to know about a multi-insert.
@@ -202,7 +199,6 @@ typedef struct PG_NO_PADDING xl_multi_insert_tuple
 	/* TUPLE DATA FOLLOWS AT END OF STRUCT */
 } xl_multi_insert_tuple;
 
-#define SizeOfMultiInsertTuple	sizeof(xl_multi_insert_tuple)
 
 /*
  * This is what we need to know about update|hot_update
@@ -237,7 +233,6 @@ typedef struct PG_NO_PADDING xl_heap_update
 	 */
 } xl_heap_update;
 
-#define SizeOfHeapUpdate	sizeof(xl_heap_update)
 
 /*
  * These structures and flags encode VACUUM pruning and freezing and on-access
@@ -299,7 +294,6 @@ typedef struct PG_NO_PADDING xl_heap_prune
 	 */
 } xl_heap_prune;
 
-#define SizeOfHeapPrune sizeof(xl_heap_prune)
 
 /* to handle recovery conflict during logical decoding on standby */
 #define		XLHP_IS_CATALOG_REL			(1 << 1)
@@ -418,7 +412,6 @@ typedef struct PG_NO_PADDING xl_heap_lock
 	uint8		flags;			/* XLH_LOCK_* flag bits */
 } xl_heap_lock;
 
-#define SizeOfHeapLock	sizeof(xl_heap_lock)
 
 /* This is what we need to know about locking an updated version of a row */
 typedef struct PG_NO_PADDING xl_heap_lock_updated
@@ -429,7 +422,6 @@ typedef struct PG_NO_PADDING xl_heap_lock_updated
 	uint8		flags;
 } xl_heap_lock_updated;
 
-#define SizeOfHeapLockUpdated	sizeof(xl_heap_lock_updated)
 
 /* This is what we need to know about confirmation of speculative insertion */
 typedef struct PG_NO_PADDING xl_heap_confirm
@@ -437,7 +429,6 @@ typedef struct PG_NO_PADDING xl_heap_confirm
 	OffsetNumber offnum;		/* confirmed tuple's offset on page */
 } xl_heap_confirm;
 
-#define SizeOfHeapConfirm	sizeof(xl_heap_confirm)
 
 /* This is what we need to know about in-place update */
 typedef struct PG_NO_PADDING xl_heap_inplace
@@ -469,7 +460,6 @@ typedef struct PG_NO_PADDING xl_heap_visible
 	pg_padding_2(pg_pad2);
 } xl_heap_visible;
 
-#define SizeOfHeapVisible sizeof(xl_heap_visible)
 
 typedef struct PG_NO_PADDING xl_heap_new_cid
 {
@@ -490,7 +480,6 @@ typedef struct PG_NO_PADDING xl_heap_new_cid
 	pg_padding_2(pg_pad);
 } xl_heap_new_cid;
 
-#define SizeOfHeapNewCid sizeof(xl_heap_new_cid)
 
 /* logical rewrite xlog record header */
 typedef struct PG_NO_PADDING xl_heap_rewrite_mapping

@@ -494,7 +494,7 @@ _bt_getroot(Relation rel, Relation heaprel, int access)
 			xlrec.rootblk = rootblkno;
 			xlrec.level = 0;
 
-			XLogRegisterData(&xlrec, SizeOfBtreeNewroot);
+			XLogRegisterData(&xlrec, sizeof(xl_btree_newroot));
 
 			recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_NEWROOT);
 
@@ -949,7 +949,7 @@ _bt_allocbuf(Relation rel, Relation heaprel)
 						RelationIsAccessibleInLogicalDecoding(heaprel);
 
 					XLogBeginInsert();
-					XLogRegisterData(&xlrec_reuse, SizeOfBtreeReusePage);
+					XLogRegisterData(&xlrec_reuse, sizeof(xl_btree_reuse_page));
 
 					XLogInsert(RM_BTREE_ID, XLOG_BTREE_REUSE_PAGE);
 				}
@@ -1234,7 +1234,7 @@ _bt_delitems_vacuum(Relation rel, Buffer buf,
 
 		XLogBeginInsert();
 		XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
-		XLogRegisterData(&xlrec_vacuum, SizeOfBtreeVacuum);
+		XLogRegisterData(&xlrec_vacuum, sizeof(xl_btree_vacuum));
 
 		if (ndeletable > 0)
 			XLogRegisterBufData(0, deletable,
@@ -1352,7 +1352,7 @@ _bt_delitems_delete(Relation rel, Buffer buf,
 
 		XLogBeginInsert();
 		XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
-		XLogRegisterData(&xlrec_delete, SizeOfBtreeDelete);
+		XLogRegisterData(&xlrec_delete, sizeof(xl_btree_delete));
 
 		if (ndeletable > 0)
 			XLogRegisterBufData(0, deletable,
@@ -1420,7 +1420,7 @@ _bt_delitems_update(BTVacuumPosting *updatable, int nupdatable,
 		_bt_update_posting(vacposting);
 
 		/* Keep track of size of xl_btree_update for updatedbuf in passing */
-		itemsz = SizeOfBtreeUpdate + vacposting->ndeletedtids * sizeof(uint16);
+		itemsz = sizeof(xl_btree_update) + vacposting->ndeletedtids * sizeof(uint16);
 		buflen += itemsz;
 
 		/* Build updatedoffsets buffer in passing */
@@ -1443,8 +1443,8 @@ _bt_delitems_update(BTVacuumPosting *updatable, int nupdatable,
 
 			update.ndeletedtids = vacposting->ndeletedtids;
 			memcpy(updatedbuf + offset, &update.ndeletedtids,
-				   SizeOfBtreeUpdate);
-			offset += SizeOfBtreeUpdate;
+				   sizeof(xl_btree_update));
+			offset += sizeof(xl_btree_update);
 
 			itemsz = update.ndeletedtids * sizeof(uint16);
 			memcpy(updatedbuf + offset, vacposting->deletetids, itemsz);
@@ -2271,7 +2271,7 @@ _bt_mark_page_halfdead(Relation rel, Relation heaprel, Buffer leafbuf,
 		xlrec.leftblk = opaque->btpo_prev;
 		xlrec.rightblk = opaque->btpo_next;
 
-		XLogRegisterData(&xlrec, SizeOfBtreeMarkPageHalfDead);
+		XLogRegisterData(&xlrec, sizeof(xl_btree_mark_page_halfdead));
 
 		recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_MARK_PAGE_HALFDEAD);
 
@@ -2698,7 +2698,7 @@ _bt_unlink_halfdead_page(Relation rel, Buffer leafbuf, BlockNumber scanblkno,
 		xlrec.leafrightsib = leafrightsib;
 		xlrec.leaftopparent = leaftopparent;
 
-		XLogRegisterData(&xlrec, SizeOfBtreeUnlinkPage);
+		XLogRegisterData(&xlrec, sizeof(xl_btree_unlink_page));
 
 		if (BufferIsValid(metabuf))
 		{

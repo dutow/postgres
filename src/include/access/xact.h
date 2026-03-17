@@ -348,7 +348,6 @@ typedef struct PG_NO_PADDING xl_xact_abort
 	/* twophase_gid follows if XINFO_HAS_GID. As a null-terminated string. */
 	/* xl_xact_origin follows if XINFO_HAS_ORIGIN, stored unaligned! */
 } xl_xact_abort;
-#define MinSizeOfXactAbort sizeof(xl_xact_abort)
 
 typedef struct xl_xact_prepare
 {

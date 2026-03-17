@@ -2803,7 +2803,7 @@ WriteMTruncateXlogRec(Oid oldestMultiDB,
 	xlrec.oldestOffset = oldestOffset;
 
 	XLogBeginInsert();
-	XLogRegisterData(&xlrec, SizeOfMultiXactTruncate);
+	XLogRegisterData(&xlrec, sizeof(xl_multixact_truncate));
 	recptr = XLogInsert(RM_MULTIXACT_ID, XLOG_MULTIXACT_TRUNCATE_ID);
 	XLogFlush(recptr);
 }
@@ -2868,7 +2868,7 @@ multixact_redo(XLogReaderState *record)
 		int64		pageno;
 
 		memcpy(&xlrec, XLogRecGetData(record),
-			   SizeOfMultiXactTruncate);
+			   sizeof(xl_multixact_truncate));
 
 		elog(DEBUG1, "replaying multixact truncation: "
 			 "oldestMulti %u (offsets segment %" PRIx64 "), "

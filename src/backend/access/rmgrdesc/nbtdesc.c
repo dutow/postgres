@@ -236,7 +236,7 @@ delvacuum_desc(StringInfo buf, char *block_data,
 		{
 			uint16	   *ptid;
 
-			ptid = (uint16 *) ((char *) updates + SizeOfBtreeUpdate) + p;
+			ptid = (uint16 *) ((char *) updates + sizeof(xl_btree_update)) + p;
 			appendStringInfo(buf, "%u", *ptid);
 
 			if (p < updates->ndeletedtids - 1)
@@ -247,7 +247,7 @@ delvacuum_desc(StringInfo buf, char *block_data,
 			appendStringInfoString(buf, ", ");
 
 		updates = (xl_btree_update *)
-			((char *) updates + SizeOfBtreeUpdate +
+			((char *) updates + sizeof(xl_btree_update) +
 			 updates->ndeletedtids * sizeof(uint16));
 	}
 	appendStringInfoChar(buf, ']');

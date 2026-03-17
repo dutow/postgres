@@ -972,7 +972,7 @@ WriteTruncateXlogRec(int64 pageno, TransactionId oldestXid)
 	xlrec.oldestXid = oldestXid;
 
 	XLogBeginInsert();
-	XLogRegisterData(&xlrec, SizeOfCommitTsTruncate);
+	XLogRegisterData(&xlrec, sizeof(xl_commit_ts_truncate));
 	(void) XLogInsert(RM_COMMIT_TS_ID, COMMIT_TS_TRUNCATE);
 }
 

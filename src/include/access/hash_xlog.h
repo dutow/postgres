@@ -64,7 +64,6 @@ typedef struct PG_NO_PADDING xl_hash_insert
 	OffsetNumber offnum;
 } xl_hash_insert;
 
-#define SizeOfHashInsert	(sizeof(xl_hash_insert))
 
 /*
  * This is what we need to know about addition of overflow page.
@@ -84,7 +83,6 @@ typedef struct PG_NO_PADDING xl_hash_add_ovfl_page
 	pg_padding_1(pg_pad);
 } xl_hash_add_ovfl_page;
 
-#define SizeOfHashAddOvflPage	(sizeof(xl_hash_add_ovfl_page))
 
 /*
  * This is what we need to know about allocating a page for split.
@@ -105,7 +103,6 @@ typedef struct PG_NO_PADDING xl_hash_split_allocate_page
 	pg_padding_2(pg_pad2);
 } xl_hash_split_allocate_page;
 
-#define SizeOfHashSplitAllocPage	(sizeof(xl_hash_split_allocate_page))
 
 /*
  * This is what we need to know about completing the split operation.
@@ -121,7 +118,6 @@ typedef struct PG_NO_PADDING xl_hash_split_complete
 	uint16		new_bucket_flag;
 } xl_hash_split_complete;
 
-#define SizeOfHashSplitComplete	(sizeof(xl_hash_split_complete))
 
 /*
  * This is what we need to know about move page contents required during
@@ -142,7 +138,6 @@ typedef struct PG_NO_PADDING xl_hash_move_page_contents
 	pg_padding_1(pg_pad);
 } xl_hash_move_page_contents;
 
-#define SizeOfHashMovePageContents	(sizeof(xl_hash_move_page_contents))
 
 /*
  * This is what we need to know about the squeeze page operation.
@@ -171,7 +166,6 @@ typedef struct PG_NO_PADDING xl_hash_squeeze_page
 											 * page */
 } xl_hash_squeeze_page;
 
-#define SizeOfHashSqueezePage	(sizeof(xl_hash_squeeze_page))
 
 /*
  * This is what we need to know about the deletion of index tuples from a page.
@@ -189,7 +183,6 @@ typedef struct PG_NO_PADDING xl_hash_delete
 										 * primary bucket page */
 } xl_hash_delete;
 
-#define SizeOfHashDelete	(sizeof(xl_hash_delete))
 
 /*
  * This is what we need for metapage update operation.
@@ -203,7 +196,6 @@ typedef struct PG_NO_PADDING xl_hash_update_meta_page
 	double		ntuples;
 } xl_hash_update_meta_page;
 
-#define SizeOfHashUpdateMetaPage	(sizeof(xl_hash_update_meta_page))
 
 /*
  * This is what we need to initialize metapage.
@@ -220,7 +212,6 @@ typedef struct PG_NO_PADDING xl_hash_init_meta_page
 	pg_padding_2(pg_pad);
 } xl_hash_init_meta_page;
 
-#define SizeOfHashInitMetaPage	(sizeof(xl_hash_init_meta_page))
 
 /*
  * This is what we need to initialize bitmap page.
@@ -235,7 +226,6 @@ typedef struct PG_NO_PADDING xl_hash_init_bitmap_page
 	uint16		bmsize;
 } xl_hash_init_bitmap_page;
 
-#define SizeOfHashInitBitmapPage	(sizeof(xl_hash_init_bitmap_page))
 
 /*
  * This is what we need for index tuple deletion and to

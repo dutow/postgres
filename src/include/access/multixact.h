@@ -92,7 +92,6 @@ typedef struct PG_NO_PADDING xl_multixact_truncate
 	MultiXactOffset oldestOffset;
 } xl_multixact_truncate;
 
-#define SizeOfMultiXactTruncate (sizeof(xl_multixact_truncate))
 
 
 extern MultiXactId MultiXactIdCreate(TransactionId xid1,

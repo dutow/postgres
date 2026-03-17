@@ -2268,7 +2268,7 @@ heap_insert(Relation relation, HeapTuple tup, CommandId cid,
 		}
 
 		XLogBeginInsert();
-		XLogRegisterData(&xlrec, SizeOfHeapInsert);
+		XLogRegisterData(&xlrec, sizeof(xl_heap_insert));
 
 		xlhdr.t_infomask2 = heaptup->t_data->t_infomask2;
 		xlhdr.t_infomask = heaptup->t_data->t_infomask;
@@ -2280,7 +2280,7 @@ heap_insert(Relation relation, HeapTuple tup, CommandId cid,
 		 * xl_heap_header in the xlog.
 		 */
 		XLogRegisterBuffer(0, buffer, REGBUF_STANDARD | bufflags);
-		XLogRegisterBufData(0, &xlhdr, SizeOfHeapHeader);
+		XLogRegisterBufData(0, &xlhdr, sizeof(xl_heap_header));
 		/* PG73FORMAT: write bitmap [+ padding] [+ oid] + data */
 		XLogRegisterBufData(0,
 							(char *) heaptup->t_data + SizeofHeapTupleHeader,
@@ -2655,7 +2655,7 @@ heap_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 					xlrec->offsets[i] = ItemPointerGetOffsetNumber(&heaptup->t_self);
 				/* xl_multi_insert_tuple needs two-byte alignment. */
 				tuphdr = (xl_multi_insert_tuple *) SHORTALIGN(scratchptr);
-				scratchptr = ((char *) tuphdr) + SizeOfMultiInsertTuple;
+				scratchptr = ((char *) tuphdr) + sizeof(xl_multi_insert_tuple);
 
 				tuphdr->t_infomask2 = heaptup->t_data->t_infomask2;
 				tuphdr->t_infomask = heaptup->t_data->t_infomask;
@@ -3179,7 +3179,7 @@ l1:
 		}
 
 		XLogBeginInsert();
-		XLogRegisterData(&xlrec, SizeOfHeapDelete);
+		XLogRegisterData(&xlrec, sizeof(xl_heap_delete));
 
 		XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
 
@@ -3192,7 +3192,7 @@ l1:
 			xlhdr.t_infomask = old_key_tuple->t_data->t_infomask;
 			xlhdr.t_hoff = old_key_tuple->t_data->t_hoff;
 
-			XLogRegisterData(&xlhdr, SizeOfHeapHeader);
+			XLogRegisterData(&xlhdr, sizeof(xl_heap_header));
 			XLogRegisterData((char *) old_key_tuple->t_data
 							 + SizeofHeapTupleHeader,
 							 old_key_tuple->t_len
@@ -3960,7 +3960,7 @@ l2:
 												  oldtup.t_data->t_infomask2);
 			xlrec.flags =
 				cleared_all_frozen ? XLH_LOCK_ALL_FROZEN_CLEARED : 0;
-			XLogRegisterData(&xlrec, SizeOfHeapLock);
+			XLogRegisterData(&xlrec, sizeof(xl_heap_lock));
 			recptr = XLogInsert(RM_HEAP_ID, XLOG_HEAP_LOCK);
 			PageSetLSN(page, recptr);
 		}
@@ -5294,7 +5294,7 @@ failed:
 		xlrec.infobits_set = compute_infobits(new_infomask,
 											  tuple->t_data->t_infomask2);
 		xlrec.flags = cleared_all_frozen ? XLH_LOCK_ALL_FROZEN_CLEARED : 0;
-		XLogRegisterData(&xlrec, SizeOfHeapLock);
+		XLogRegisterData(&xlrec, sizeof(xl_heap_lock));
 
 		/* we don't decode row locks atm, so no need to log the origin */
 
@@ -6047,7 +6047,7 @@ l4:
 			xlrec.flags =
 				cleared_all_frozen ? XLH_LOCK_ALL_FROZEN_CLEARED : 0;
 
-			XLogRegisterData(&xlrec, SizeOfHeapLockUpdated);
+			XLogRegisterData(&xlrec, sizeof(xl_heap_lock_updated));
 
 			recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_LOCK_UPDATED);
 
@@ -6211,7 +6211,7 @@ heap_finish_speculative(Relation relation, const ItemPointerData *tid)
 		/* We want the same filtering on this as on a plain insert */
 		XLogSetRecordFlags(XLOG_INCLUDE_ORIGIN);
 
-		XLogRegisterData(&xlrec, SizeOfHeapConfirm);
+		XLogRegisterData(&xlrec, sizeof(xl_heap_confirm));
 		XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
 
 		recptr = XLogInsert(RM_HEAP_ID, XLOG_HEAP_CONFIRM);
@@ -6356,7 +6356,7 @@ heap_abort_speculative(Relation relation, const ItemPointerData *tid)
 		xlrec.xmax = xid;
 
 		XLogBeginInsert();
-		XLogRegisterData(&xlrec, SizeOfHeapDelete);
+		XLogRegisterData(&xlrec, sizeof(xl_heap_delete));
 		XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
 
 		/* No replica identity & replication origin logged */
@@ -8896,7 +8896,7 @@ log_heap_visible(Relation rel, Buffer heap_buffer, Buffer vm_buffer,
 	if (RelationIsAccessibleInLogicalDecoding(rel))
 		xlrec.flags |= VISIBILITYMAP_XLOG_CATALOG_REL;
 	XLogBeginInsert();
-	XLogRegisterData(&xlrec, SizeOfHeapVisible);
+	XLogRegisterData(&xlrec, sizeof(xl_heap_visible));
 
 	XLogRegisterBuffer(0, vm_buffer, 0);
 
@@ -9047,7 +9047,7 @@ log_heap_update(Relation reln, Buffer oldbuf,
 	if (oldbuf != newbuf)
 		XLogRegisterBuffer(1, oldbuf, REGBUF_STANDARD);
 
-	XLogRegisterData(&xlrec, SizeOfHeapUpdate);
+	XLogRegisterData(&xlrec, sizeof(xl_heap_update));
 
 	/*
 	 * Prepare WAL data for the new tuple.
@@ -9080,7 +9080,7 @@ log_heap_update(Relation reln, Buffer oldbuf,
 	 *
 	 * The 'data' doesn't include the common prefix or suffix.
 	 */
-	XLogRegisterBufData(0, &xlhdr, SizeOfHeapHeader);
+	XLogRegisterBufData(0, &xlhdr, sizeof(xl_heap_header));
 	if (prefixlen == 0)
 	{
 		XLogRegisterBufData(0,
@@ -9115,7 +9115,7 @@ log_heap_update(Relation reln, Buffer oldbuf,
 		xlhdr_idx.t_infomask = old_key_tuple->t_data->t_infomask;
 		xlhdr_idx.t_hoff = old_key_tuple->t_data->t_hoff;
 
-		XLogRegisterData(&xlhdr_idx, SizeOfHeapHeader);
+		XLogRegisterData(&xlhdr_idx, sizeof(xl_heap_header));
 
 		/* PG73FORMAT: write bitmap [+ padding] [+ oid] + data */
 		XLogRegisterData((char *) old_key_tuple->t_data + SizeofHeapTupleHeader,
@@ -9195,7 +9195,7 @@ log_heap_new_cid(Relation relation, HeapTuple tup)
 	 * called us certainly did, but that's WAL-logged separately.
 	 */
 	XLogBeginInsert();
-	XLogRegisterData(&xlrec, SizeOfHeapNewCid);
+	XLogRegisterData(&xlrec, sizeof(xl_heap_new_cid));
 
 	/* will be looked at irrespective of origin */
 

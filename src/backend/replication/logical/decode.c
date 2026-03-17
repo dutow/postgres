@@ -923,7 +923,7 @@ DecodeInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	memcpy(&change->data.tp.rlocator, &target_locator, sizeof(RelFileLocator));
 
 	tupledata = XLogRecGetBlockData(r, 0, &datalen);
-	tuplelen = datalen - SizeOfHeapHeader;
+	tuplelen = datalen - sizeof(xl_heap_header);
 
 	change->data.tp.newtuple =
 		ReorderBufferAllocTupleBuf(ctx->reorder, tuplelen);
@@ -975,7 +975,7 @@ DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 		data = XLogRecGetBlockData(r, 0, &datalen);
 
-		tuplelen = datalen - SizeOfHeapHeader;
+		tuplelen = datalen - sizeof(xl_heap_header);
 
 		change->data.tp.newtuple =
 			ReorderBufferAllocTupleBuf(ctx->reorder, tuplelen);
@@ -989,9 +989,9 @@ DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		Size		tuplelen;
 
 		/* caution, remaining data in record is not aligned */
-		data = XLogRecGetData(r) + SizeOfHeapUpdate;
-		datalen = XLogRecGetDataLen(r) - SizeOfHeapUpdate;
-		tuplelen = datalen - SizeOfHeapHeader;
+		data = XLogRecGetData(r) + sizeof(xl_heap_update);
+		datalen = XLogRecGetDataLen(r) - sizeof(xl_heap_update);
+		tuplelen = datalen - sizeof(xl_heap_header);
 
 		change->data.tp.oldtuple =
 			ReorderBufferAllocTupleBuf(ctx->reorder, tuplelen);
@@ -1043,15 +1043,15 @@ DecodeDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	/* old primary key stored */
 	if (xlrec->flags & XLH_DELETE_CONTAINS_OLD)
 	{
-		Size		datalen = XLogRecGetDataLen(r) - SizeOfHeapDelete;
-		Size		tuplelen = datalen - SizeOfHeapHeader;
+		Size		datalen = XLogRecGetDataLen(r) - sizeof(xl_heap_delete);
+		Size		tuplelen = datalen - sizeof(xl_heap_header);
 
-		Assert(XLogRecGetDataLen(r) > (SizeOfHeapDelete + SizeOfHeapHeader));
+		Assert(XLogRecGetDataLen(r) > (sizeof(xl_heap_delete) + sizeof(xl_heap_header)));
 
 		change->data.tp.oldtuple =
 			ReorderBufferAllocTupleBuf(ctx->reorder, tuplelen);
 
-		DecodeXLogTuple((char *) xlrec + SizeOfHeapDelete,
+		DecodeXLogTuple((char *) xlrec + sizeof(xl_heap_delete),
 						datalen, change->data.tp.oldtuple);
 	}
 
@@ -1154,7 +1154,7 @@ DecodeMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		memcpy(&change->data.tp.rlocator, &rlocator, sizeof(RelFileLocator));
 
 		xlhdr = (xl_multi_insert_tuple *) SHORTALIGN(data);
-		data = ((char *) xlhdr) + SizeOfMultiInsertTuple;
+		data = ((char *) xlhdr) + sizeof(xl_multi_insert_tuple);
 		datalen = xlhdr->datalen;
 
 		change->data.tp.newtuple =
@@ -1246,7 +1246,7 @@ static void
 DecodeXLogTuple(char *data, Size len, HeapTuple tuple)
 {
 	xl_heap_header xlhdr = {0};
-	int			datalen = len - SizeOfHeapHeader;
+	int			datalen = len - sizeof(xl_heap_header);
 	HeapTupleHeader header;
 
 	Assert(datalen >= 0);
@@ -1261,12 +1261,12 @@ DecodeXLogTuple(char *data, Size len, HeapTuple tuple)
 	tuple->t_tableOid = InvalidOid;
 
 	/* data is not stored aligned, copy to aligned storage */
-	memcpy(&xlhdr, data, SizeOfHeapHeader);
+	memcpy(&xlhdr, data, sizeof(xl_heap_header));
 
 	memset(header, 0, SizeofHeapTupleHeader);
 
 	memcpy(((char *) tuple->t_data) + SizeofHeapTupleHeader,
-		   data + SizeOfHeapHeader,
+		   data + sizeof(xl_heap_header),
 		   datalen);
 
 	header->t_infomask = xlhdr.t_infomask;

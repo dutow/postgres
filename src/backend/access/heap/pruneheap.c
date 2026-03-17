@@ -2291,7 +2291,7 @@ log_heap_prune_and_freeze(Relation relation, Buffer buffer,
 		Assert(nredirected == 0 && ndead == 0);
 		/* also, any items in 'unused' must've been LP_DEAD previously */
 	}
-	XLogRegisterData(&xlrec, SizeOfHeapPrune);
+	XLogRegisterData(&xlrec, sizeof(xl_heap_prune));
 	if (TransactionIdIsValid(conflict_xid))
 		XLogRegisterData(&conflict_xid, sizeof(TransactionId));
 

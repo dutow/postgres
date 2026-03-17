@@ -1328,7 +1328,7 @@ _bt_insertonpg(Relation rel,
 			xlrec.offnum = newitemoff;
 
 			XLogBeginInsert();
-			XLogRegisterData(&xlrec, SizeOfBtreeInsert);
+			XLogRegisterData(&xlrec, sizeof(xl_btree_insert));
 
 			if (isleaf && postingoff == 0)
 			{
@@ -1994,7 +1994,7 @@ _bt_split(Relation rel, Relation heaprel, BTScanInsert itup_key, Buffer buf,
 			xlrec.postingoff = postingoff;
 
 		XLogBeginInsert();
-		XLogRegisterData(&xlrec, SizeOfBtreeSplit);
+		XLogRegisterData(&xlrec, sizeof(xl_btree_split));
 
 		XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
 		XLogRegisterBuffer(1, rbuf, REGBUF_WILL_INIT);
@@ -2578,7 +2578,7 @@ _bt_newlevel(Relation rel, Relation heaprel, Buffer lbuf, Buffer rbuf)
 		xlrec.level = metad->btm_level;
 
 		XLogBeginInsert();
-		XLogRegisterData(&xlrec, SizeOfBtreeNewroot);
+		XLogRegisterData(&xlrec, sizeof(xl_btree_newroot));
 
 		XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
 		XLogRegisterBuffer(1, lbuf, REGBUF_STANDARD);

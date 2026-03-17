@@ -252,7 +252,7 @@ _bt_dedup_pass(Relation rel, Buffer buf, IndexTuple newitem, Size newitemsz,
 
 		XLogBeginInsert();
 		XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
-		XLogRegisterData(&xlrec_dedup, SizeOfBtreeDedup);
+		XLogRegisterData(&xlrec_dedup, sizeof(xl_btree_dedup));
 
 		/*
 		 * The intervals array is not in the buffer, but pretend that it is.

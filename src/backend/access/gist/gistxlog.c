@@ -557,7 +557,7 @@ gistXLogPageDelete(Buffer buffer, FullTransactionId xid,
 	xlrec.downlinkOffset = downlinkOffset;
 
 	XLogBeginInsert();
-	XLogRegisterData(&xlrec, SizeOfGistxlogPageDelete);
+	XLogRegisterData(&xlrec, sizeof(gistxlogPageDelete));
 
 	XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
 	XLogRegisterBuffer(1, parentBuffer, REGBUF_STANDARD);
@@ -607,7 +607,7 @@ gistXLogPageReuse(Relation rel, Relation heaprel,
 	xlrec_reuse.snapshotConflictHorizon = deleteXid;
 
 	XLogBeginInsert();
-	XLogRegisterData(&xlrec_reuse, SizeOfGistxlogPageReuse);
+	XLogRegisterData(&xlrec_reuse, sizeof(gistxlogPageReuse));
 
 	XLogInsert(RM_GIST_ID, XLOG_GIST_PAGE_REUSE);
 }

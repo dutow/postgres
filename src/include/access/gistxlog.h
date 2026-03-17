@@ -97,7 +97,6 @@ typedef struct PG_NO_PADDING gistxlogPageDelete
 	pg_padding_4(pg_pad2);
 } gistxlogPageDelete;
 
-#define SizeOfGistxlogPageDelete	(sizeof(gistxlogPageDelete))
 
 
 /*
@@ -115,7 +114,6 @@ typedef struct PG_NO_PADDING gistxlogPageReuse
 	pg_padding_4(pg_pad4);
 } gistxlogPageReuse;
 
-#define SizeOfGistxlogPageReuse	(sizeof(gistxlogPageReuse))
 
 extern void gist_redo(XLogReaderState *record);
 extern void gist_desc(StringInfo buf, XLogReaderState *record);

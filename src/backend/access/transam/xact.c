@@ -6096,7 +6096,7 @@ XactLogAbortRecord(TimestampTz abort_time,
 
 	XLogBeginInsert();
 
-	XLogRegisterData(&xlrec, MinSizeOfXactAbort);
+	XLogRegisterData(&xlrec, sizeof(xl_xact_abort));
 
 	if (xl_xinfo.xinfo != 0)
 		XLogRegisterData(&xl_xinfo, sizeof(xl_xinfo));
