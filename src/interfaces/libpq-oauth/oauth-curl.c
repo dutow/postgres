@@ -2796,6 +2796,10 @@ pg_fe_run_oauth_flow_impl(PGconn *conn)
 		/* Should we enable unsafe features? */
 		actx->debugging = oauth_unsafe_debugging_enabled();
 
+		if (actx->debugging)
+			fprintf(stderr,
+					libpq_gettext("WARNING: PGOAUTHDEBUG trace is enabled. HTTP traffic (including secrets) will be logged.\n"));
+
 		state->async_ctx = actx;
 
 		initPQExpBuffer(&actx->work_data);
@@ -3081,6 +3085,11 @@ pg_fe_run_oauth_flow(PGconn *conn)
 			fprintf(stderr, "[libpq] total number of polls: %d\n",
 					actx->dbg_num_calls);
 	}
+
+	if (actx && actx->debugging
+		&& (result == PGRES_POLLING_OK || result == PGRES_POLLING_FAILED))
+		fprintf(stderr,
+				libpq_gettext("WARNING: PGOAUTHDEBUG trace output above may contain secrets. Do not share with third parties.\n"));
 
 #ifndef WIN32
 	if (masked)
