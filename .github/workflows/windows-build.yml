@@ -49,6 +49,13 @@ jobs:
         run: |
           pip install --upgrade meson ninja
 
+      - name: Install Pester and run unit tests
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0
+          $result = Invoke-Pester -Path ci/windows/scripts/Tests -PassThru
+          if ($result.FailedCount -gt 0) { exit 1 }
+
       - name: Install flex and bison
         shell: pwsh
         run: |
@@ -64,75 +71,20 @@ jobs:
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         run: |
-          # Discover the actual vcpkg install directory (lukka/run-vcpkg uses a per-run GUID path).
-          $candidates = @(
-            $env:VCPKG_INSTALLED_DIR,
-            $env:VCPKG_MANIFEST_INSTALL_DIR,
-            "$env:VCPKG_ROOT/installed"
-          ) | Where-Object { $_ -and (Test-Path $_) }
-
-          # Look under workspace/runner-temp for the actual x64-windows tree.
-          $searchRoots = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP) | Where-Object { $_ -and (Test-Path $_) }
-          $found = $searchRoots |
-            ForEach-Object { Get-ChildItem -Path $_ -Recurse -Filter "x64-windows" -Directory -ErrorAction SilentlyContinue -Depth 5 } |
-            Where-Object { Test-Path (Join-Path $_.FullName "lib/pkgconfig") } |
-            Select-Object -First 1
-
-          $installRoot = if ($found) { $found.FullName } else { $null }
-          if (-not $installRoot) {
-            Write-Host "Candidates checked:"
-            $candidates | ForEach-Object { Write-Host "  $_" }
-            Get-ChildItem Env: | Where-Object { $_.Name -like "VCPKG*" } | Format-Table -AutoSize | Out-String | Write-Host
-            throw "Could not locate vcpkg x64-windows install tree"
-          }
-
-          $pkgConfigPath = Join-Path $installRoot "lib/pkgconfig"
-          Write-Host "vcpkg install root: $installRoot"
-          Write-Host "pkg-config path:    $pkgConfigPath"
-          Write-Host ".pc files found:    $((Get-ChildItem "$pkgConfigPath/*.pc" -ErrorAction SilentlyContinue).Count)"
-
-          $env:CMAKE_PREFIX_PATH = $installRoot
-          $env:PKG_CONFIG_PATH   = $pkgConfigPath
-
-          # Put vcpkg bin on PATH for the Test step so dynamically-linked DLLs
-          # (openssl, icu, zlib, etc.) resolve when postgres.exe/initdb.exe run.
-          $vcpkgBin = Join-Path $installRoot "bin"
-          if (Test-Path $vcpkgBin) {
-            Add-Content -Path $env:GITHUB_PATH -Value $vcpkgBin
-            Write-Host "Added to GITHUB_PATH: $vcpkgBin"
-            Write-Host "DLLs present: $((Get-ChildItem "$vcpkgBin/*.dll" -ErrorAction SilentlyContinue).Count)"
-          } else {
-            Write-Host "::warning::vcpkg bin directory not found at $vcpkgBin — tests will likely fail with missing DLLs"
-          }
-
           $shortSha = "${{ github.sha }}".Substring(0,7)
-          meson setup build `
-            --buildtype=release `
-            --prefix=C:/pgsql-stage `
-            "--pkg-config-path=$pkgConfigPath" `
-            "--cmake-prefix-path=$installRoot" `
-            -Dssl=openssl `
-            -Dicu=enabled `
-            -Dzlib=enabled `
-            -Dzstd=enabled `
-            -Dlz4=enabled `
-            -Dlibxml=enabled `
-            -Dlibxslt=enabled `
-            -Dldap=auto `
-            -Dplperl=disabled `
-            -Dplpython=disabled `
-            -Dpltcl=disabled `
-            "-Dextra_version=-psp-$shortSha"
+          ./ci/windows/scripts/configure.ps1 -ExtraVersion "-psp-$shortSha"
 
       - name: Build
         shell: pwsh
-        run: ninja -C build
+        run: ./ci/windows/scripts/build.ps1
 
       - name: Test
         shell: pwsh
         timeout-minutes: 50
         continue-on-error: true
-        run: meson test -C build --num-processes 4 --print-errorlogs --timeout-multiplier 0.3
+        run: |
+          ./ci/windows/scripts/test.ps1
+          exit $LASTEXITCODE
 
       - name: Upload test logs
         if: always()

@@ -13,16 +13,35 @@ This directory contains everything specific to the Windows build and MSI install
 
 ## Running locally (Windows only)
 
-On a Windows machine with Visual Studio 2022, vcpkg, meson, ninja, WiX 5, and PowerShell 7 installed:
+Prerequisites (install once):
+- Visual Studio 2022 with "Desktop development with C++" (MSVC v14.4+).
+- PowerShell 7 (`pwsh`).
+- Python 3 + `pip install meson ninja`.
+- `choco install winflexbison3 pkgconfiglite`.
+- vcpkg cloned somewhere with `VCPKG_ROOT` pointing at it.
+
+Build the dependencies once, from the repo root:
 
 ```powershell
-./scripts/configure.ps1
-./scripts/build.ps1
-./scripts/stage.ps1 -DestDir C:/stage
-# Then build the MSI from ci/windows/installer.
+vcpkg install --x-manifest-root=ci/windows --triplet x64-windows
 ```
 
-See `.github/workflows/windows-build.yml` for the authoritative pipeline.
+Then iterate:
+
+```powershell
+./ci/windows/scripts/configure.ps1 -ExtraVersion "-local"
+./ci/windows/scripts/build.ps1
+./ci/windows/scripts/test.ps1                        # fast feedback (timeout-multiplier 0.3)
+./ci/windows/scripts/test.ps1 -TimeoutMultiplier 1   # full-timeout run
+./ci/windows/scripts/test.ps1 -Suite regress         # single suite
+./ci/windows/scripts/stage.ps1 -DestDir C:/pgsql-local-stage
+```
+
+Run the script-level unit tests:
+
+```powershell
+Invoke-Pester ci/windows/scripts/Tests
+```
 
 ## Branding
 
