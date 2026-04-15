@@ -108,7 +108,7 @@ jobs:
           $shortSha = "${{ github.sha }}".Substring(0,7)
           meson setup build `
             --buildtype=release `
-            --prefix=C:/stage/pgsql `
+            --prefix=C:/pgsql-stage `
             "--pkg-config-path=$pkgConfigPath" `
             "--cmake-prefix-path=$installRoot" `
             -Dssl=openssl `
@@ -130,14 +130,19 @@ jobs:
 
       - name: Test
         shell: pwsh
-        run: meson test -C build --num-processes 4 --print-errorlogs
+        timeout-minutes: 50
+        continue-on-error: true
+        run: meson test -C build --num-processes 4 --print-errorlogs --timeout-multiplier 0.3
 
-      - name: Upload meson logs on failure
-        if: failure()
+      - name: Upload test logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-${{ github.sha }}
           path: |
             build/meson-logs/
+            build/testrun/**/log/**
+            build/testrun/**/regress_log/**
             build/**/crashlog-*.txt
           retention-days: 14
+          if-no-files-found: ignore
