@@ -14,7 +14,7 @@ if (-not (Test-Path $ninjaFile)) {
 }
 
 if ($PSCmdlet.ShouldProcess($DestDir, "meson install --destdir")) {
-    & meson install -C $BuildDir --destdir $DestDir
+    & meson install -C "$BuildDir" --destdir "$DestDir"
     if ($LASTEXITCODE -ne 0) {
         throw "meson install failed with exit code $LASTEXITCODE"
     }

@@ -13,7 +13,7 @@ if (-not (Test-Path $ninjaFile)) {
 }
 
 if ($PSCmdlet.ShouldProcess($BuildDir, 'Run ninja')) {
-    & ninja -C $BuildDir
+    & ninja -C "$BuildDir"
     if ($LASTEXITCODE -ne 0) {
         throw "ninja build failed with exit code $LASTEXITCODE"
     }

@@ -11,6 +11,8 @@ param(
     [string]$Tag        = ''
 )
 
+$ErrorActionPreference = "Stop"
+
 $mesonFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($MesonBuild)
 if (-not (Test-Path $mesonFile)) {
     throw "meson.build not found at: $mesonFile"
