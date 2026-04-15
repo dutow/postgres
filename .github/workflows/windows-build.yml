@@ -94,6 +94,17 @@ jobs:
           $env:CMAKE_PREFIX_PATH = $installRoot
           $env:PKG_CONFIG_PATH   = $pkgConfigPath
 
+          # Put vcpkg bin on PATH for the Test step so dynamically-linked DLLs
+          # (openssl, icu, zlib, etc.) resolve when postgres.exe/initdb.exe run.
+          $vcpkgBin = Join-Path $installRoot "bin"
+          if (Test-Path $vcpkgBin) {
+            Add-Content -Path $env:GITHUB_PATH -Value $vcpkgBin
+            Write-Host "Added to GITHUB_PATH: $vcpkgBin"
+            Write-Host "DLLs present: $((Get-ChildItem "$vcpkgBin/*.dll" -ErrorAction SilentlyContinue).Count)"
+          } else {
+            Write-Host "::warning::vcpkg bin directory not found at $vcpkgBin — tests will likely fail with missing DLLs"
+          }
+
           $shortSha = "${{ github.sha }}".Substring(0,7)
           meson setup build `
             --buildtype=release `
