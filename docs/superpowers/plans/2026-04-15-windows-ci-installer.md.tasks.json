@@ -1,0 +1,82 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-15-windows-ci-installer.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Scaffolding",
+      "status": "pending",
+      "description": "**Goal:** Create the `ci/windows/` directory tree with README documenting the layout.\n\n**Files:**\n- Create: `ci/windows/README.md`\n\n**Verify:** `ls ci/windows/` shows `README.md`.\n\n```json:metadata\n{\"files\": [\"ci/windows/README.md\"], \"verifyCommand\": \"ls ci/windows/\", \"acceptanceCriteria\": [\"README documents directory layout\", \"No .gitkeep placeholders\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: vcpkg manifest",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** Declare Windows dependencies via pinned vcpkg manifest.\n\n**Files:**\n- Create: `ci/windows/vcpkg.json`\n- Create: `ci/windows/vcpkg-configuration.json`\n\n**Verify:** `jq empty` on both files succeeds; 8 dependencies listed.\n\n```json:metadata\n{\"files\": [\"ci/windows/vcpkg.json\", \"ci/windows/vcpkg-configuration.json\"], \"verifyCommand\": \"jq empty ci/windows/vcpkg.json && jq -r '.dependencies | length' ci/windows/vcpkg.json\", \"acceptanceCriteria\": [\"Lists openssl, icu, zlib, zstd, lz4, libxml2, libxslt, openldap\", \"Pins builtin-baseline commit\", \"Valid JSON\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Workflow skeleton (build + test)",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** First working GHA workflow: checkout, vcpkg, meson configure, ninja build, meson test. First validation checkpoint.\n\n**Files:**\n- Create: `.github/workflows/windows-build.yml`\n\n**Verify:** Push branch; `gh run watch --exit-status` succeeds.\n\n```json:metadata\n{\"files\": [\".github/workflows/windows-build.yml\"], \"verifyCommand\": \"git push && gh run watch --exit-status\", \"acceptanceCriteria\": [\"Triggers on PSP_REL_* push + workflow_dispatch\", \"Runs on windows-2022\", \"Uses vcpkg + MSVC + meson + ninja\", \"meson test runs with 4 processes\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: PowerShell build helpers",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Extract configure/build/stage into scripts with Pester tests; refactor workflow to call them.\n\n**Files:**\n- Create: `ci/windows/scripts/{version,configure,build,stage}.ps1`\n- Create: `ci/windows/scripts/Tests/{version,configure,stage}.Tests.ps1`\n- Modify: `.github/workflows/windows-build.yml`\n\n**Verify:** Pester passes on runner; workflow still green.\n\n```json:metadata\n{\"files\": [\"ci/windows/scripts/version.ps1\", \"ci/windows/scripts/configure.ps1\", \"ci/windows/scripts/build.ps1\", \"ci/windows/scripts/stage.ps1\", \"ci/windows/scripts/Tests/\"], \"verifyCommand\": \"git push && gh run watch --exit-status\", \"acceptanceCriteria\": [\"Scripts support -WhatIf\", \"Pester tests run in workflow\", \"Workflow refactored to call scripts\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Minimal WiX installer (file-only)",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** First MSI: file-only install, default WiX UI, no custom actions. Silent install/uninstall round-trips cleanly.\n\n**Files:**\n- Create: `ci/windows/installer/{Product.wxs,wix.props,License.rtf,README.md,Banner.bmp,Dialog.bmp}`\n- Modify: `.github/workflows/windows-build.yml`\n\n**Verify:** Workflow green; MSI artifact uploaded.\n\n```json:metadata\n{\"files\": [\"ci/windows/installer/Product.wxs\", \"ci/windows/installer/wix.props\", \"ci/windows/installer/License.rtf\", \"ci/windows/installer/README.md\", \".github/workflows/windows-build.yml\"], \"verifyCommand\": \"git push && gh run watch --exit-status\", \"acceptanceCriteria\": [\"heat generates Files.wxs at build\", \"wix build produces MSI\", \"Artifact uploaded\", \"MajorUpgrade configured\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Wizard UI",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** Custom wizard dialogs (install dir, data dir, password, port, locale) replacing default WiX UI.\n\n**Files:**\n- Create: `ci/windows/installer/UI.wxs`\n- Modify: `ci/windows/installer/Product.wxs`\n\n**Verify:** MSI still builds green; wizard properties available via msiexec CLI.\n\n```json:metadata\n{\"files\": [\"ci/windows/installer/UI.wxs\", \"ci/windows/installer/Product.wxs\"], \"verifyCommand\": \"git push && gh run watch --exit-status\", \"acceptanceCriteria\": [\"Wizard pages: Welcome/License/InstallDir/DataDir/Password/Port/Locale\", \"Password confirm field validated\", \"MSI compiles\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Service custom actions (scripts)",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** PowerShell scripts for initdb/service-register/service-remove with Pester tests. Standalone and testable.\n\n**Files:**\n- Create: `ci/windows/installer/CustomActions/{InitDb,RegisterService,RemoveService}.ps1`\n- Create: `ci/windows/installer/CustomActions/Tests/*.Tests.ps1`\n- Modify: `.github/workflows/windows-build.yml` (expand Pester path)\n\n**Verify:** Pester tests pass in workflow.\n\n```json:metadata\n{\"files\": [\"ci/windows/installer/CustomActions/InitDb.ps1\", \"ci/windows/installer/CustomActions/RegisterService.ps1\", \"ci/windows/installer/CustomActions/RemoveService.ps1\"], \"verifyCommand\": \"git push && gh run watch --exit-status\", \"acceptanceCriteria\": [\"InitDb shreds pwfile on failure\", \"RegisterService waits for pg_isready (30s)\", \"RemoveService idempotent\"]}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: Wire custom actions + smoke test",
+      "status": "pending",
+      "blockedBy": [6],
+      "description": "**Goal:** Connect custom actions into WiX InstallExecuteSequence; add smoke-test.ps1; workflow blocks publish on broken MSI.\n\n**Files:**\n- Modify: `ci/windows/installer/Product.wxs`\n- Modify: `ci/windows/scripts/stage.ps1`\n- Create: `ci/windows/scripts/smoke-test.ps1`\n- Modify: `.github/workflows/windows-build.yml`\n\n**Verify:** Workflow green end-to-end including smoke test.\n\n```json:metadata\n{\"files\": [\"ci/windows/installer/Product.wxs\", \"ci/windows/scripts/smoke-test.ps1\", \"ci/windows/scripts/stage.ps1\", \".github/workflows/windows-build.yml\"], \"verifyCommand\": \"git push && gh run watch --exit-status\", \"acceptanceCriteria\": [\"Custom actions scheduled in InstallExecuteSequence\", \"Smoke test does install/verify/uninstall\", \"Smoke-test failure blocks publish\", \"Smoke-test logs uploaded on failure\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: Optional signing",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Optional signtool signing gated on secrets, with warning when unconfigured. Fork-PR builds never sign.\n\n**Files:**\n- Create: `ci/windows/scripts/sign.ps1`\n- Modify: `.github/workflows/windows-build.yml`\n\n**Verify:** Workflow green, emits unsigned warning when secrets absent.\n\n```json:metadata\n{\"files\": [\"ci/windows/scripts/sign.ps1\", \".github/workflows/windows-build.yml\"], \"verifyCommand\": \"git push && gh run watch --exit-status\", \"acceptanceCriteria\": [\"Signs with SHA256 + RFC3161 timestamp when secrets present\", \"Shreds PFX temp file in finally\", \"Warns when secrets missing\", \"Guards against fork PRs\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 9: Artifacts, nightly release, tag release",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** Publish nightly-psp18 rolling release on branch push and proper GitHub Release on v* tag.\n\n**Files:**\n- Modify: `.github/workflows/windows-build.yml`\n\n**Verify:** Push creates/updates nightly release; tag push creates proper release.\n\n```json:metadata\n{\"files\": [\".github/workflows/windows-build.yml\"], \"verifyCommand\": \"git push && gh run watch --exit-status && gh release view nightly-psp18\", \"acceptanceCriteria\": [\"Nightly tag derived from branch name\", \"Uses softprops/action-gh-release@v2\", \"Nightly marked pre-release\", \"Tag release has auto-generated notes\", \"contents:write permission set\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 10: PR label gating",
+      "status": "pending",
+      "blockedBy": [9],
+      "description": "**Goal:** Opt-in PR builds via `needs-windows-installer` label. Saves GHA minutes for unlabeled PRs.\n\n**Files:**\n- Modify: `.github/workflows/windows-build.yml`\n\n**Verify:** Unlabeled PR → no run; labeled PR → full pipeline (no publish).\n\n```json:metadata\n{\"files\": [\".github/workflows/windows-build.yml\"], \"verifyCommand\": \"git push # then verify PR behavior manually post-merge\", \"acceptanceCriteria\": [\"pull_request trigger added for PSP_REL_*\", \"Job if: gates on label\", \"Publish steps excluded for PRs\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-15T12:45:00Z"
+}
