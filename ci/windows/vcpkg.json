@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "percona-postgresql-windows",
+  "version-string": "18.0.0",
+  "description": "Build-time dependencies for Percona Server for PostgreSQL on Windows",
+  "dependencies": [
+    "openssl",
+    "icu",
+    "zlib",
+    "zstd",
+    "lz4",
+    "libxml2",
+    "libxslt",
+    "openldap"
+  ]
+}
