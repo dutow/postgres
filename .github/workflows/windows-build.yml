@@ -49,6 +49,11 @@ jobs:
         run: |
           pip install --upgrade meson ninja
 
+      - name: Install flex and bison
+        shell: pwsh
+        run: |
+          choco install --no-progress -y winflexbison3
+
       - name: Configure
         shell: pwsh
         env:
