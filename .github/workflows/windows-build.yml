@@ -54,16 +54,52 @@ jobs:
         run: |
           choco install --no-progress -y winflexbison3
 
+      - name: Install pkg-config
+        shell: pwsh
+        run: |
+          choco install --no-progress -y pkgconfiglite
+
       - name: Configure
         shell: pwsh
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         run: |
+          # Discover the actual vcpkg install directory (lukka/run-vcpkg uses a per-run GUID path).
+          $candidates = @(
+            $env:VCPKG_INSTALLED_DIR,
+            $env:VCPKG_MANIFEST_INSTALL_DIR,
+            "$env:VCPKG_ROOT/installed"
+          ) | Where-Object { $_ -and (Test-Path $_) }
+
+          # Look under workspace/runner-temp for the actual x64-windows tree.
+          $searchRoots = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP) | Where-Object { $_ -and (Test-Path $_) }
+          $found = $searchRoots |
+            ForEach-Object { Get-ChildItem -Path $_ -Recurse -Filter "x64-windows" -Directory -ErrorAction SilentlyContinue -Depth 5 } |
+            Where-Object { Test-Path (Join-Path $_.FullName "lib/pkgconfig") } |
+            Select-Object -First 1
+
+          $installRoot = if ($found) { $found.FullName } else { $null }
+          if (-not $installRoot) {
+            Write-Host "Candidates checked:"
+            $candidates | ForEach-Object { Write-Host "  $_" }
+            Get-ChildItem Env: | Where-Object { $_.Name -like "VCPKG*" } | Format-Table -AutoSize | Out-String | Write-Host
+            throw "Could not locate vcpkg x64-windows install tree"
+          }
+
+          $pkgConfigPath = Join-Path $installRoot "lib/pkgconfig"
+          Write-Host "vcpkg install root: $installRoot"
+          Write-Host "pkg-config path:    $pkgConfigPath"
+          Write-Host ".pc files found:    $((Get-ChildItem "$pkgConfigPath/*.pc" -ErrorAction SilentlyContinue).Count)"
+
+          $env:CMAKE_PREFIX_PATH = $installRoot
+          $env:PKG_CONFIG_PATH   = $pkgConfigPath
+
           $shortSha = "${{ github.sha }}".Substring(0,7)
           meson setup build `
             --buildtype=release `
             --prefix=C:/stage/pgsql `
-            --pkg-config-path="$env:VCPKG_ROOT/installed/x64-windows/lib/pkgconfig" `
+            "--pkg-config-path=$pkgConfigPath" `
+            "--cmake-prefix-path=$installRoot" `
             -Dssl=openssl `
             -Dicu=enabled `
             -Dzlib=enabled `
