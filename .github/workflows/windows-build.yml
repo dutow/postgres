@@ -66,7 +66,7 @@ jobs:
             -Dlz4=enabled `
             -Dlibxml=enabled `
             -Dlibxslt=enabled `
-            -Dldap=enabled `
+            -Dldap=auto `
             -Dplperl=disabled `
             -Dplpython=disabled `
             -Dpltcl=disabled `

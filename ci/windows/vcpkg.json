@@ -10,7 +10,6 @@
     "zstd",
     "lz4",
     "libxml2",
-    "libxslt",
-    "openldap"
+    "libxslt"
   ]
 }
