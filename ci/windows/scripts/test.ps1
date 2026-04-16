@@ -16,6 +16,19 @@ param(
     [string[]] $MesonArgs         = @()
 )
 
+. $PSScriptRoot/vcpkg.ps1
+
+# Ensure vcpkg bin is on PATH so tmp_install postgres.exe can load libxml2.dll,
+# lz4.dll, zstd.dll, etc. In CI this duplicates configure.ps1's GITHUB_PATH
+# write; locally (where steps share a single shell) this is the only thing
+# that puts the DLLs on PATH.
+try {
+    $vcpkg = Get-VcpkgInstallRoot
+    Add-VcpkgBinToPath -BinDir $vcpkg.BinDir
+} catch {
+    Write-Warning "vcpkg bin discovery failed; tests will rely on existing PATH: $_"
+}
+
 $mesonTestArgs = @(
     'test',
     '-C', $BuildDir,
