@@ -25,6 +25,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout pg_tde
+        uses: actions/checkout@v4
+        with:
+          repository: percona/pg_tde
+          ref: main
+          path: pg_tde
+
       - name: Export GitHub Actions cache env for vcpkg
         uses: actions/github-script@v7
         with:
@@ -53,7 +60,7 @@ jobs:
         shell: pwsh
         run: |
           Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0
-          $result = Invoke-Pester -Path ci/windows/scripts/Tests, ci/windows/installer/CustomActions/Tests -PassThru
+          $result = Invoke-Pester -Path ci/windows/scripts/Tests, ci/windows/scripts/pg_tde/Tests, ci/windows/installer/CustomActions/Tests -PassThru
           if ($result.FailedCount -gt 0) { exit 1 }
 
       - name: Install flex and bison
@@ -92,12 +99,6 @@ jobs:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         run: ./ci/windows/scripts/stage.ps1 -DestDir C:/stage
 
-      - name: Install WiX 5
-        shell: pwsh
-        run: |
-          dotnet tool install --global wix --version 5.0.2
-          wix extension add -g WixToolset.UI.wixext
-
       - name: Locate staged prefix
         id: stage_prefix
         shell: pwsh
@@ -107,6 +108,37 @@ jobs:
           $prefix = $exe.Directory.Parent.FullName
           Write-Host "Staged prefix: $prefix"
           "prefix=$prefix" >> $env:GITHUB_OUTPUT
+
+      - name: Configure pg_tde
+        shell: pwsh
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: |
+          ./ci/windows/scripts/pg_tde/configure.ps1 `
+            -SourceDir "${{ github.workspace }}/pg_tde" `
+            -StagePrefix "${{ steps.stage_prefix.outputs.prefix }}"
+
+      - name: Build pg_tde
+        shell: pwsh
+        run: ./ci/windows/scripts/pg_tde/build.ps1
+
+      - name: Test pg_tde
+        shell: pwsh
+        timeout-minutes: 30
+        continue-on-error: true
+        run: |
+          ./ci/windows/scripts/pg_tde/test.ps1
+          exit $LASTEXITCODE
+
+      - name: Stage pg_tde
+        shell: pwsh
+        run: ./ci/windows/scripts/pg_tde/stage.ps1 -DestDir C:/stage
+
+      - name: Install WiX 5
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext
 
       - name: Resolve version
         id: msi_version
@@ -154,5 +186,8 @@ jobs:
             build/testrun/**/regress_log/**
             build/**/crashlog-*.txt
             build/**/*.pdb
+            pg_tde_build/meson-logs/
+            pg_tde_build/testrun/**/log/**
+            pg_tde_build/testrun/**/regress_log/**
           retention-days: 14
           if-no-files-found: ignore
