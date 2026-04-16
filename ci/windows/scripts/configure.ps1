@@ -79,7 +79,7 @@ if (Test-Path $vcpkgBin) {
     }
     Write-Host "DLLs present: $((Get-ChildItem "$vcpkgBin/*.dll" -ErrorAction SilentlyContinue).Count)"
 } else {
-    Write-Warning "vcpkg bin directory not found at $vcpkgBin — tests will likely fail with missing DLLs"
+    Write-Warning "vcpkg bin directory not found at $vcpkgBin - tests will likely fail with missing DLLs"
 }
 
 # --- 4. meson setup ---
