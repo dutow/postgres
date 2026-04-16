@@ -1,0 +1,58 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-16-pg-tde-windows-integration.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Add libcurl to vcpkg manifest",
+      "status": "pending",
+      "description": "**Goal:** Ensure vcpkg installs libcurl so pg_tde's dependency('libcurl') resolves and libcurl.dll ends up beside pg_tde.dll in the staged tree.\n\n**Files:**\n- Modify: ci/windows/vcpkg.json\n\n**Acceptance Criteria:**\n- vcpkg.json lists 'curl' in dependencies\n- JSON parses with ConvertFrom-Json\n\n**Verify:** `Get-Content ci/windows/vcpkg.json | ConvertFrom-Json | Select-Object -ExpandProperty dependencies` contains curl.\n\n```json:metadata\n{\"files\": [\"ci/windows/vcpkg.json\"], \"verifyCommand\": \"Get-Content ci/windows/vcpkg.json | ConvertFrom-Json | Select-Object -ExpandProperty dependencies\", \"acceptanceCriteria\": [\"curl listed in dependencies\", \"JSON parses cleanly\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: pg_tde configure helper + Pester tests",
+      "status": "pending",
+      "description": "**Goal:** configure.ps1 that runs meson setup on pg_tde, pointing pg_config at a staged PG install and wiring vcpkg pkgconfig/prefix paths.\n\n**Files:**\n- Create: ci/windows/scripts/pg_tde/configure.ps1\n- Create: ci/windows/scripts/pg_tde/Tests/configure.Tests.ps1\n\n**Acceptance Criteria:**\n- Takes -SourceDir, -BuildDir, -StagePrefix (mandatory), -MesonArgs\n- Throws clearly on missing StagePrefix/pg_config.exe/meson.build\n- Dot-sources ../vcpkg.ps1\n- Pester tests cover error paths and -WhatIf\n\n**Verify:** `Invoke-Pester ci/windows/scripts/pg_tde/Tests/configure.Tests.ps1 -PassThru` FailedCount -eq 0.\n\n```json:metadata\n{\"files\": [\"ci/windows/scripts/pg_tde/configure.ps1\", \"ci/windows/scripts/pg_tde/Tests/configure.Tests.ps1\"], \"verifyCommand\": \"Invoke-Pester ci/windows/scripts/pg_tde/Tests/configure.Tests.ps1 -PassThru\", \"acceptanceCriteria\": [\"Parameters match spec\", \"All four Pester tests pass\", \"Uses vcpkg.ps1 helpers\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: pg_tde build helper + Pester tests",
+      "status": "pending",
+      "description": "**Goal:** Thin build.ps1 that runs ninja in the pg_tde build dir.\n\n**Files:**\n- Create: ci/windows/scripts/pg_tde/build.ps1\n- Create: ci/windows/scripts/pg_tde/Tests/build.Tests.ps1\n\n**Acceptance Criteria:**\n- Takes -BuildDir (default pg_tde_build)\n- Throws with build.ninja message when missing\n- Pester tests cover missing/empty build dir\n\n**Verify:** `Invoke-Pester ci/windows/scripts/pg_tde/Tests/build.Tests.ps1 -PassThru` FailedCount -eq 0.\n\n```json:metadata\n{\"files\": [\"ci/windows/scripts/pg_tde/build.ps1\", \"ci/windows/scripts/pg_tde/Tests/build.Tests.ps1\"], \"verifyCommand\": \"Invoke-Pester ci/windows/scripts/pg_tde/Tests/build.Tests.ps1 -PassThru\", \"acceptanceCriteria\": [\"Throws on missing build.ninja\", \"Both Pester tests pass\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: pg_tde test helper + Pester tests",
+      "status": "pending",
+      "description": "**Goal:** test.ps1 that runs meson test against pg_tde build dir, returns LASTEXITCODE without throwing.\n\n**Files:**\n- Create: ci/windows/scripts/pg_tde/test.ps1\n- Create: ci/windows/scripts/pg_tde/Tests/test.Tests.ps1\n\n**Acceptance Criteria:**\n- Takes -BuildDir, -NumProcesses, -TimeoutMultiplier (default 1.0), -Suite, -MesonArgs\n- Does NOT throw on non-zero meson exit\n- Puts vcpkg bin on PATH best-effort\n\n**Verify:** `Invoke-Pester ci/windows/scripts/pg_tde/Tests/test.Tests.ps1 -PassThru` FailedCount -eq 0.\n\n```json:metadata\n{\"files\": [\"ci/windows/scripts/pg_tde/test.ps1\", \"ci/windows/scripts/pg_tde/Tests/test.Tests.ps1\"], \"verifyCommand\": \"Invoke-Pester ci/windows/scripts/pg_tde/Tests/test.Tests.ps1 -PassThru\", \"acceptanceCriteria\": [\"Non-throwing on bad build dir\", \"Returns numeric exit code\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: pg_tde stage helper + Pester tests",
+      "status": "pending",
+      "description": "**Goal:** stage.ps1 that runs meson install --destdir into the existing staged PG tree; no runtime-DLL copy.\n\n**Files:**\n- Create: ci/windows/scripts/pg_tde/stage.ps1\n- Create: ci/windows/scripts/pg_tde/Tests/stage.Tests.ps1\n\n**Acceptance Criteria:**\n- Takes -DestDir (mandatory), -BuildDir\n- Throws with build.ninja message when missing\n- -WhatIf skips meson install\n\n**Verify:** `Invoke-Pester ci/windows/scripts/pg_tde/Tests/stage.Tests.ps1 -PassThru` FailedCount -eq 0.\n\n```json:metadata\n{\"files\": [\"ci/windows/scripts/pg_tde/stage.ps1\", \"ci/windows/scripts/pg_tde/Tests/stage.Tests.ps1\"], \"verifyCommand\": \"Invoke-Pester ci/windows/scripts/pg_tde/Tests/stage.Tests.ps1 -PassThru\", \"acceptanceCriteria\": [\"Throws on missing build.ninja\", \"-WhatIf leaves DestDir untouched\", \"All three Pester tests pass\"]}\n```",
+      "blockedBy": []
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: CI workflow wiring",
+      "status": "pending",
+      "blockedBy": [0, 1, 2, 3, 4],
+      "description": "**Goal:** Extend .github/workflows/windows-build.yml to check out pg_tde, run its Pester tests, and run its configure/build/test/stage steps against the staged PG tree.\n\n**Files:**\n- Modify: .github/workflows/windows-build.yml\n\n**Acceptance Criteria:**\n- New 'Checkout pg_tde' step with repository: percona/pg_tde, ref: main, path: pg_tde\n- Pester -Path extended to include ci/windows/scripts/pg_tde/Tests\n- 'Locate staged prefix' moved to directly after 'Stage install tree'\n- Four new steps: Configure pg_tde, Build pg_tde, Test pg_tde (continue-on-error, 30m), Stage pg_tde\n- Test-log upload includes pg_tde_build/ paths\n\n**Verify:** Push branch; observe all steps run and artifact uploads succeed.\n\n```json:metadata\n{\"files\": [\".github/workflows/windows-build.yml\"], \"verifyCommand\": \"git diff .github/workflows/windows-build.yml\", \"acceptanceCriteria\": [\"Checkout pg_tde step present\", \"Pester path extended\", \"pg_tde configure/build/test/stage steps present\", \"Test pg_tde has continue-on-error: true\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Update README",
+      "status": "pending",
+      "blockedBy": [1, 2, 3, 4],
+      "description": "**Goal:** Add a '## pg_tde' section to ci/windows/README.md documenting local clone and helper invocations.\n\n**Files:**\n- Modify: ci/windows/README.md\n\n**Acceptance Criteria:**\n- Section placed between 'Running locally' and 'Branding'\n- Shows clone command, configure/build/test/stage invocations, Pester command\n- Notes CI checks out main automatically\n\n**Verify:** `Get-Content ci/windows/README.md | Select-String '^## '` shows pg_tde between Running locally and Branding.\n\n```json:metadata\n{\"files\": [\"ci/windows/README.md\"], \"verifyCommand\": \"Get-Content ci/windows/README.md | Select-String '^## '\", \"acceptanceCriteria\": [\"pg_tde section present\", \"Correct position relative to other sections\", \"Commands match helper signatures\"]}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: End-to-end verification",
+      "status": "pending",
+      "blockedBy": [5, 6],
+      "description": "**Goal:** Confirm merged MSI contains pg_tde.dll + frontends + SQL files + libcurl.dll, and CREATE EXTENSION pg_tde works on a clean install.\n\n**Files:**\n- Verify only; no edits.\n\n**Acceptance Criteria:**\n- CI run completes (Test pg_tde allowed to fail)\n- MSI inspection lists: pg_tde.dll, 9 pg_tde_*.exe, 3 SQL files, pg_tde.control, libcurl*.dll\n- CREATE EXTENSION pg_tde succeeds on clean install\n- pg_tde test logs attached to artifact\n\n**Verify:** `lessmsi l percona-postgresql-18-*.msi | grep -E 'pg_tde|libcurl'` shows the expected files.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"lessmsi l percona-postgresql-18-*.msi | grep -E 'pg_tde|libcurl'\", \"acceptanceCriteria\": [\"All pg_tde files present in MSI\", \"libcurl.dll present\", \"CREATE EXTENSION succeeds\", \"Test logs uploaded\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-16T00:00:00Z"
+}
