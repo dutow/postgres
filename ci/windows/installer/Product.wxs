@@ -15,6 +15,12 @@
 
     <MediaTemplate EmbedCab="yes" />
 
+    <Property Id="DATADIR"            Value="C:\Program Files\Percona\PostgreSQL\18\data" />
+    <Property Id="PGPORT"             Value="5432" />
+    <Property Id="PGLOCALE"           Value="" />
+    <Property Id="PGPASSWORD"         Value="" />
+    <Property Id="PGPASSWORD_CONFIRM" Value="" />
+
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="PerconaDir" Name="Percona">
         <Directory Id="PostgreSQLDir" Name="PostgreSQL">
@@ -31,7 +37,7 @@
     <WixVariable Id="WixUIBannerBmp"  Value="Banner.bmp" />
     <WixVariable Id="WixUIDialogBmp"  Value="Dialog.bmp" />
 
-    <ui:WixUI Id="WixUI_InstallDir" />
+    <ui:WixUI Id="PerconaPgUI" />
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR_" />
   </Package>
 </Wix>

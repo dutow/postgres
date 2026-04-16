@@ -128,7 +128,7 @@ jobs:
         shell: pwsh
         run: |
           cd ci/windows/installer
-          wix build Product.wxs Files.wxs `
+          wix build Product.wxs UI.wxs Files.wxs `
             -ext WixToolset.UI.wixext `
             -d ProductVersion=${{ steps.msi_version.outputs.msi_version }} `
             -d StageDir="${{ steps.stage_prefix.outputs.prefix }}" `

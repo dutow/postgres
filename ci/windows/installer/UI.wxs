@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Fragment>
+    <ui:WixUI Id="PerconaPgUI">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title"  FaceName="Tahoma" Size="9" Bold="yes" />
+
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+      <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR_" />
+
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <Publish Dialog="WelcomeDlg"          Control="Next" Event="NewDialog" Value="LicenseAgreementDlg" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Condition="LicenseAccepted = &quot;1&quot;" />
+      <Publish Dialog="InstallDirDlg"       Control="Back" Event="NewDialog" Value="LicenseAgreementDlg" />
+      <Publish Dialog="InstallDirDlg"       Control="Next" Event="NewDialog" Value="DataDirDlg" />
+      <Publish Dialog="DataDirDlg"          Control="Back" Event="NewDialog" Value="InstallDirDlg" />
+      <Publish Dialog="DataDirDlg"          Control="Next" Event="NewDialog" Value="PasswordDlg" />
+      <Publish Dialog="PasswordDlg"         Control="Back" Event="NewDialog" Value="DataDirDlg" />
+      <Publish Dialog="PasswordDlg"         Control="Next" Event="NewDialog" Value="PortDlg" Condition="PGPASSWORD = PGPASSWORD_CONFIRM AND PGPASSWORD &lt;&gt; &quot;&quot;" />
+      <Publish Dialog="PortDlg"             Control="Back" Event="NewDialog" Value="PasswordDlg" />
+      <Publish Dialog="PortDlg"             Control="Next" Event="NewDialog" Value="LocaleDlg" />
+      <Publish Dialog="LocaleDlg"           Control="Back" Event="NewDialog" Value="PortDlg" />
+      <Publish Dialog="LocaleDlg"           Control="Next" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="VerifyReadyDlg"      Control="Back" Event="NewDialog" Value="LocaleDlg" />
+    </ui:WixUI>
+
+    <Dialog Id="DataDirDlg" Width="370" Height="270" Title="Data directory">
+      <Control Id="Title"       Type="Text"       X="15"  Y="6"   Width="340" Height="15" Text="{\WixUI_Font_Title}Data directory" />
+      <Control Id="Description" Type="Text"       X="25"  Y="26"  Width="320" Height="20" Text="Choose the directory where PostgreSQL will store database files." />
+      <Control Id="DataDirEdit" Type="PathEdit"   X="20"  Y="60"  Width="320" Height="18" Property="DATADIR" Indirect="no" />
+      <Control Id="Back"        Type="PushButton" X="180" Y="243" Width="56"  Height="17" Text="&amp;Back" />
+      <Control Id="Next"        Type="PushButton" X="236" Y="243" Width="56"  Height="17" Default="yes" Text="&amp;Next" />
+      <Control Id="Cancel"      Type="PushButton" X="304" Y="243" Width="56"  Height="17" Cancel="yes" Text="Cancel">
+        <Publish Event="SpawnDialog" Value="CancelDlg" />
+      </Control>
+    </Dialog>
+
+    <Dialog Id="PasswordDlg" Width="370" Height="270" Title="Superuser password">
+      <Control Id="Title"           Type="Text"       X="15"  Y="6"   Width="340" Height="15" Text="{\WixUI_Font_Title}Superuser password" />
+      <Control Id="Description"     Type="Text"       X="25"  Y="26"  Width="320" Height="30" Text="Set the password for the 'postgres' superuser. Minimum 8 characters. Store this password securely — it cannot be recovered." />
+      <Control Id="PwLabel"         Type="Text"       X="20"  Y="80"  Width="80"  Height="15" Text="Password:" />
+      <Control Id="PwEdit"          Type="Edit"       X="100" Y="78"  Width="240" Height="18" Property="PGPASSWORD" Password="yes" />
+      <Control Id="PwConfirmLabel"  Type="Text"       X="20"  Y="110" Width="80"  Height="15" Text="Confirm:" />
+      <Control Id="PwConfirmEdit"   Type="Edit"       X="100" Y="108" Width="240" Height="18" Property="PGPASSWORD_CONFIRM" Password="yes" />
+      <Control Id="Back"            Type="PushButton" X="180" Y="243" Width="56"  Height="17" Text="&amp;Back" />
+      <Control Id="Next"            Type="PushButton" X="236" Y="243" Width="56"  Height="17" Default="yes" Text="&amp;Next" />
+      <Control Id="Cancel"          Type="PushButton" X="304" Y="243" Width="56"  Height="17" Cancel="yes" Text="Cancel">
+        <Publish Event="SpawnDialog" Value="CancelDlg" />
+      </Control>
+    </Dialog>
+
+    <Dialog Id="PortDlg" Width="370" Height="270" Title="Port">
+      <Control Id="Title"       Type="Text"       X="15"  Y="6"   Width="340" Height="15" Text="{\WixUI_Font_Title}Network port" />
+      <Control Id="Description" Type="Text"       X="25"  Y="26"  Width="320" Height="20" Text="TCP port the server will listen on." />
+      <Control Id="PortEdit"    Type="Edit"       X="20"  Y="60"  Width="80"  Height="18" Property="PGPORT" />
+      <Control Id="Back"        Type="PushButton" X="180" Y="243" Width="56"  Height="17" Text="&amp;Back" />
+      <Control Id="Next"        Type="PushButton" X="236" Y="243" Width="56"  Height="17" Default="yes" Text="&amp;Next" />
+      <Control Id="Cancel"      Type="PushButton" X="304" Y="243" Width="56"  Height="17" Cancel="yes" Text="Cancel">
+        <Publish Event="SpawnDialog" Value="CancelDlg" />
+      </Control>
+    </Dialog>
+
+    <Dialog Id="LocaleDlg" Width="370" Height="270" Title="Locale">
+      <Control Id="Title"       Type="Text"       X="15"  Y="6"   Width="340" Height="15" Text="{\WixUI_Font_Title}Locale" />
+      <Control Id="Description" Type="Text"       X="25"  Y="26"  Width="320" Height="20" Text="Database locale. Leave blank for system default." />
+      <Control Id="LocaleCombo" Type="ComboBox"   X="20"  Y="60"  Width="200" Height="18" Property="PGLOCALE">
+        <ComboBox Property="PGLOCALE">
+          <ListItem Value=""            Text="Default (system locale)" />
+          <ListItem Value="C"           Text="C" />
+          <ListItem Value="en_US.UTF-8" Text="en_US.UTF-8" />
+        </ComboBox>
+      </Control>
+      <Control Id="Back"        Type="PushButton" X="180" Y="243" Width="56"  Height="17" Text="&amp;Back" />
+      <Control Id="Next"        Type="PushButton" X="236" Y="243" Width="56"  Height="17" Default="yes" Text="&amp;Next" />
+      <Control Id="Cancel"      Type="PushButton" X="304" Y="243" Width="56"  Height="17" Cancel="yes" Text="Cancel">
+        <Publish Event="SpawnDialog" Value="CancelDlg" />
+      </Control>
+    </Dialog>
+  </Fragment>
+</Wix>
