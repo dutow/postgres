@@ -62,7 +62,7 @@ Build against an already-staged PG tree (`stage.ps1` must have run first):
 ./ci/windows/scripts/pg_tde/build.ps1
 ./ci/windows/scripts/pg_tde/test.ps1                        # full TAP suite
 ./ci/windows/scripts/pg_tde/test.ps1 -Suite basic           # one suite
-./ci/windows/scripts/pg_tde/stage.ps1 -DestDir C:/pgsql-local-stage
+./ci/windows/scripts/pg_tde/stage.ps1
 ```
 
 All four helpers accept `-SourceDir` to point at a pg_tde checkout that

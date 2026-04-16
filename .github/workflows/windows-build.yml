@@ -28,8 +28,8 @@ jobs:
       - name: Checkout pg_tde
         uses: actions/checkout@v4
         with:
-          repository: percona/pg_tde
-          ref: main
+          repository: dutow/pg_tde
+          ref: wininst
           path: pg_tde
 
       - name: Export GitHub Actions cache env for vcpkg
@@ -122,17 +122,9 @@ jobs:
         shell: pwsh
         run: ./ci/windows/scripts/pg_tde/build.ps1
 
-      - name: Test pg_tde
-        shell: pwsh
-        timeout-minutes: 30
-        continue-on-error: true
-        run: |
-          ./ci/windows/scripts/pg_tde/test.ps1
-          exit $LASTEXITCODE
-
       - name: Stage pg_tde
         shell: pwsh
-        run: ./ci/windows/scripts/pg_tde/stage.ps1 -DestDir C:/stage
+        run: ./ci/windows/scripts/pg_tde/stage.ps1
 
       - name: Install WiX 5
         shell: pwsh

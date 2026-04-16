@@ -1,16 +1,23 @@
 <#
 .SYNOPSIS
-    Install pg_tde into an existing staged PG tree via meson install --destdir.
+    Install pg_tde into the staged PG tree it was configured against.
 .DESCRIPTION
-    Unlike the main ci/windows/scripts/stage.ps1, this script does not copy
-    runtime DLLs - the main stage step already dropped them into the staged
-    bin/ directory. pg_tde's meson install adds pg_tde.dll, frontend .exes,
-    and share/extension/pg_tde* files alongside PG's own artifacts, so the
-    existing wix heat harvest picks them up automatically.
+    pg_tde's meson.build derives install_dir from pg_config (--bindir,
+    --libdir, --sharedir), which return absolute paths into the staged PG
+    tree picked at configure time. So a plain `meson install` (no
+    --destdir) drops pg_tde.dll, frontend .exes, and share/extension/pg_tde*
+    files alongside PG's own artifacts already in that tree.
+
+    Using --destdir would prepend it to those absolute paths, nesting the
+    files under destdir + the entire stage prefix path - not what we want.
+
+    This script does not copy runtime DLLs - the main
+    ci/windows/scripts/stage.ps1 already dropped them into the staged bin/
+    directory, and the existing wix heat harvest picks pg_tde's additions
+    up automatically.
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [Parameter(Mandatory)][string]$DestDir,
     [string]$BuildDir = 'pg_tde_build'
 )
 
@@ -19,10 +26,10 @@ if (-not (Test-Path $ninjaFile)) {
     throw "build.ninja not found in '$BuildDir'. Run ci/windows/scripts/pg_tde/configure.ps1 and build.ps1 first."
 }
 
-if ($PSCmdlet.ShouldProcess($DestDir, "meson install --destdir (pg_tde)")) {
-    & meson install -C "$BuildDir" --destdir "$DestDir"
+if ($PSCmdlet.ShouldProcess($BuildDir, "meson install (pg_tde)")) {
+    & meson install -C "$BuildDir"
     if ($LASTEXITCODE -ne 0) {
         throw "pg_tde meson install failed with exit code $LASTEXITCODE"
     }
-    Write-Host "pg_tde staged into: $DestDir"
+    Write-Host "pg_tde installed from: $BuildDir"
 }
