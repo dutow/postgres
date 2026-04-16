@@ -96,5 +96,6 @@ jobs:
             build/testrun/**/log/**
             build/testrun/**/regress_log/**
             build/**/crashlog-*.txt
+            build/**/*.pdb
           retention-days: 14
           if-no-files-found: ignore

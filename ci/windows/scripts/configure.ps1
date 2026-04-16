@@ -85,12 +85,12 @@ if (Test-Path $vcpkgBin) {
 # --- 4. meson setup ---
 $mesonSetupArgs = @(
     'setup', $BuildDir,
-    '--buildtype=release',
+    '--buildtype=debugoptimized',
     "--prefix=$Prefix",
     "--pkg-config-path=$pkgConfigPath",
     "--cmake-prefix-path=$installRoot",
-    '-Dssl=openssl',
-    '-Dicu=enabled',
+    '-Dssl=disabled',
+    '-Dicu=disabled',
     '-Dzlib=enabled',
     '-Dzstd=enabled',
     '-Dlz4=enabled',
