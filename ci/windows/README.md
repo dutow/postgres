@@ -43,6 +43,37 @@ Run the script-level unit tests:
 Invoke-Pester ci/windows/scripts/Tests
 ```
 
+## pg_tde
+
+`pg_tde.dll` ships inside the same MSI but lives in a separate repository
+(`percona/pg_tde`). CI checks out `main` automatically via a second
+`actions/checkout@v4`; for local builds clone it yourself into a sibling
+directory (default expected location: `../pg_tde` relative to the PG repo
+root):
+
+```powershell
+git clone https://github.com/percona/pg_tde.git ../pg_tde
+```
+
+Build against an already-staged PG tree (`stage.ps1` must have run first):
+
+```powershell
+./ci/windows/scripts/pg_tde/configure.ps1 -StagePrefix C:/pgsql-stage
+./ci/windows/scripts/pg_tde/build.ps1
+./ci/windows/scripts/pg_tde/test.ps1                        # full TAP suite
+./ci/windows/scripts/pg_tde/test.ps1 -Suite basic           # one suite
+./ci/windows/scripts/pg_tde/stage.ps1 -DestDir C:/pgsql-local-stage
+```
+
+All four helpers accept `-SourceDir` to point at a pg_tde checkout that
+isn't at `../pg_tde`.
+
+Run the pg_tde helper unit tests:
+
+```powershell
+Invoke-Pester ci/windows/scripts/pg_tde/Tests
+```
+
 ## Branding
 
 `installer/Banner.bmp` and `installer/Dialog.bmp` are placeholder images. Replace with real Percona branding before shipping a non-testing build. See `installer/README.md` for required dimensions.
