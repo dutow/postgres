@@ -45,8 +45,10 @@ $env:PKG_CONFIG_PATH   = $pkgConfigPath
 Add-VcpkgBinToPath -BinDir $vcpkg.BinDir -Persist
 
 # --- 4. meson setup ---
+# Pass source dir as a positional arg rather than cd'ing into it, so the
+# build dir lives at CWD (matching build.ps1/test.ps1/stage.ps1 defaults).
 $mesonSetupArgs = @(
-    'setup', $BuildDir,
+    'setup', $BuildDir, $resolvedSource,
     '--buildtype=debugoptimized',
     "--pkg-config-path=$pkgConfigPath",
     "--cmake-prefix-path=$installRoot",
@@ -55,15 +57,10 @@ $mesonSetupArgs = @(
 $mesonSetupArgs += $MesonArgs
 
 if ($PSCmdlet.ShouldProcess("meson setup $BuildDir (pg_tde)", 'Run meson setup')) {
-    Push-Location $resolvedSource
-    try {
-        Write-Host "Running (in $resolvedSource): meson $($mesonSetupArgs -join ' ')"
-        & meson @mesonSetupArgs
-        if ($LASTEXITCODE -ne 0) {
-            throw "meson setup failed with exit code $LASTEXITCODE"
-        }
-    } finally {
-        Pop-Location
+    Write-Host "Running: meson $($mesonSetupArgs -join ' ')"
+    & meson @mesonSetupArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "meson setup failed with exit code $LASTEXITCODE"
     }
 }
 
