@@ -86,6 +86,63 @@ jobs:
           ./ci/windows/scripts/test.ps1 -Suite setup,regress
           exit $LASTEXITCODE
 
+      - name: Stage install tree
+        shell: pwsh
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: ./ci/windows/scripts/stage.ps1 -DestDir C:/stage
+
+      - name: Install WiX 5
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext
+
+      - name: Locate staged prefix
+        id: stage_prefix
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem C:/stage -Recurse -Filter postgres.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw "postgres.exe not found anywhere under C:/stage — meson install did not produce expected layout" }
+          $prefix = $exe.Directory.Parent.FullName
+          Write-Host "Staged prefix: $prefix"
+          "prefix=$prefix" >> $env:GITHUB_OUTPUT
+
+      - name: Resolve version
+        id: msi_version
+        shell: pwsh
+        run: |
+          $v = ./ci/windows/scripts/version.ps1 -CommitSha "${{ github.sha }}"
+          "msi_version=$($v.MsiVersion)" >> $env:GITHUB_OUTPUT
+          "artifact_name=$($v.ArtifactName)" >> $env:GITHUB_OUTPUT
+
+      - name: Harvest staged tree
+        shell: pwsh
+        run: |
+          wix heat dir "${{ steps.stage_prefix.outputs.prefix }}" `
+            -gg -sfrag -srd `
+            -cg StagedFiles -dr INSTALLDIR_ -var var.StageDir `
+            -out ci/windows/installer/Files.wxs
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          cd ci/windows/installer
+          wix build Product.wxs Files.wxs `
+            -ext WixToolset.UI.wixext `
+            -d ProductVersion=${{ steps.msi_version.outputs.msi_version }} `
+            -d StageDir="${{ steps.stage_prefix.outputs.prefix }}" `
+            -o "${{ github.workspace }}/${{ steps.msi_version.outputs.artifact_name }}"
+
+      - name: Upload MSI artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-${{ github.sha }}
+          path: ${{ steps.msi_version.outputs.artifact_name }}
+          retention-days: 30
+          if-no-files-found: ignore
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4

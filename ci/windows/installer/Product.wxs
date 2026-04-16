@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+      Name="Percona Server for PostgreSQL 18"
+      Manufacturer="Percona"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="9A3B2E4C-7F81-4E2D-BC59-0E5F3A8B1C42"
+      Scope="perMachine"
+      Compressed="yes">
+
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of Percona Server for PostgreSQL 18 is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="PerconaDir" Name="Percona">
+        <Directory Id="PostgreSQLDir" Name="PostgreSQL">
+          <Directory Id="INSTALLDIR_" Name="18" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Percona Server for PostgreSQL 18" Level="1">
+      <ComponentGroupRef Id="StagedFiles" />
+    </Feature>
+
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+    <WixVariable Id="WixUIBannerBmp"  Value="Banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp"  Value="Dialog.bmp" />
+
+    <ui:WixUI Id="WixUI_InstallDir" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR_" />
+  </Package>
+</Wix>
