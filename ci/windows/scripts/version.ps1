@@ -31,14 +31,17 @@ if ($Tag) {
     $msiVersion = $Tag -replace '^v', ''
     $msiVersion = if ($msiVersion -match '^([\d.]+)') { $Matches[1] } else { $msiVersion }
     $artifactName = "percona-postgresql-18-$Tag-x64.msi"
+    $zipName      = "percona-postgresql-18-$Tag-x64.zip"
 } else {
     $msiVersion  = $version
     $artifactName = "percona-postgresql-18-$version-$shortSha-x64.msi"
+    $zipName      = "percona-postgresql-18-$version-$shortSha-x64.zip"
 }
 
 [PSCustomObject]@{
     Version      = $version
     ShortSha     = $shortSha
     ArtifactName = $artifactName
+    ZipName      = $zipName
     MsiVersion   = $msiVersion
 }

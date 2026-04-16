@@ -140,14 +140,14 @@ jobs:
           $v = ./ci/windows/scripts/version.ps1 -CommitSha "${{ github.sha }}"
           "msi_version=$($v.MsiVersion)" >> $env:GITHUB_OUTPUT
           "artifact_name=$($v.ArtifactName)" >> $env:GITHUB_OUTPUT
+          "zip_name=$($v.ZipName)" >> $env:GITHUB_OUTPUT
 
       - name: Harvest staged tree
         shell: pwsh
         run: |
-          wix heat dir "${{ steps.stage_prefix.outputs.prefix }}" `
-            -gg -sfrag -srd `
-            -cg StagedFiles -dr INSTALLDIR_ -var var.StageDir `
-            -out ci/windows/installer/Files.wxs
+          ./ci/windows/scripts/harvest.ps1 `
+            -StageDir "${{ steps.stage_prefix.outputs.prefix }}" `
+            -OutFile ci/windows/installer/Files.wxs
 
       - name: Build MSI
         shell: pwsh
@@ -158,6 +158,23 @@ jobs:
             -d ProductVersion=${{ steps.msi_version.outputs.msi_version }} `
             -d StageDir="${{ steps.stage_prefix.outputs.prefix }}" `
             -o "${{ github.workspace }}/${{ steps.msi_version.outputs.artifact_name }}"
+
+      - name: Create portable ZIP
+        if: steps.msi_version.outputs.zip_name != ''
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path "${{ steps.stage_prefix.outputs.prefix }}\*" `
+            -DestinationPath "${{ github.workspace }}/${{ steps.msi_version.outputs.zip_name }}"
+
+      - name: Upload ZIP artifact
+        if: always() && steps.msi_version.outputs.zip_name != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: zip-${{ github.sha }}
+          path: ${{ steps.msi_version.outputs.zip_name }}
+          retention-days: 30
+          if-no-files-found: ignore
 
       - name: Upload MSI artifact
         if: always() && steps.msi_version.outputs.artifact_name != ''
