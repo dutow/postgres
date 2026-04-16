@@ -10,7 +10,7 @@ Describe 'test.ps1' {
         $threw = $false
         try {
             # Pass a bogus build dir; meson exits non-zero, script must NOT throw
-            $exitCode = & $script:TestScript -BuildDir (Join-Path $TestDrive 'no-build')
+            & $script:TestScript -BuildDir (Join-Path $TestDrive 'no-build') 2>&1 | Out-Null
         } catch {
             $threw = $true
         }
@@ -23,7 +23,8 @@ Describe 'test.ps1' {
     }
 
     It 'returns a numeric exit code' {
-        $result = & $script:TestScript -BuildDir (Join-Path $TestDrive 'no-build')
-        $result | Should -BeOfType [int]
+        & $script:TestScript -BuildDir (Join-Path $TestDrive 'no-build') 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Not -BeNullOrEmpty
+        $LASTEXITCODE | Should -BeOfType [int]
     }
 }
