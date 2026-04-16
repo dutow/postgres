@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Stop and unregister a postgres Windows service. Idempotent — succeeds
+    Stop and unregister a postgres Windows service. Idempotent - succeeds
     if the service is already gone.
 #>
 [CmdletBinding()]

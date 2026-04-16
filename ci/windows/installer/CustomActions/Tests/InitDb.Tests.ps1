@@ -16,7 +16,7 @@ Describe "InitDb.ps1" {
     It "shreds the pwfile after a failed initdb invocation" {
         $tmp = New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) (New-Guid))
         try {
-            # Stub initdb.exe — a small batch file that always exits non-zero, renamed .exe
+            # Stub initdb.exe - a small batch file that always exits non-zero, renamed .exe
             # Windows will reject .bat-as-.exe execution, but the script will throw early
             # with a non-zero $LASTEXITCODE, which is the path we want to exercise.
             $stub = Join-Path $tmp "initdb.exe"

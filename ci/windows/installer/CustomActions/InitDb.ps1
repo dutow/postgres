@@ -4,7 +4,7 @@
 
 .NOTES
     The pwfile is written to a random path under %TEMP%, handed to initdb,
-    then overwritten with zeros and deleted in a finally block — regardless
+    then overwritten with zeros and deleted in a finally block - regardless
     of whether initdb succeeded. Passing the password via env or argv would
     leak it to process-listing tools or event logs; pwfile is the only safe
     mechanism on Windows.

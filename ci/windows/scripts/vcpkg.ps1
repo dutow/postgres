@@ -5,7 +5,7 @@
 .DESCRIPTION
     Dot-source this file to get Get-VcpkgInstallRoot and Add-VcpkgBinToPath.
     Used by configure.ps1, stage.ps1, and test.ps1 so they all agree on where
-    vcpkg put its DLLs — tests need them on PATH, staging copies them into the
+    vcpkg put its DLLs - tests need them on PATH, staging copies them into the
     install prefix so the MSI is self-contained.
 #>
 
@@ -73,7 +73,7 @@ function Add-VcpkgBinToPath {
     )
 
     if (-not (Test-Path $BinDir)) {
-        Write-Warning "vcpkg bin directory not found at $BinDir — skipping PATH update"
+        Write-Warning "vcpkg bin directory not found at $BinDir - skipping PATH update"
         return
     }
 

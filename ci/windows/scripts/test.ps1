@@ -46,5 +46,5 @@ $mesonTestArgs += $MesonArgs
 Write-Host "Running: meson $($mesonTestArgs -join ' ')"
 & meson @mesonTestArgs
 
-# Intentionally not throwing — caller inspects $LASTEXITCODE
+# Intentionally not throwing - caller inspects $LASTEXITCODE
 return $LASTEXITCODE

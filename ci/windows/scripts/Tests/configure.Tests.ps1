@@ -38,7 +38,7 @@ Describe 'configure.ps1' {
             $env:GITHUB_WORKSPACE           = $null
             $env:RUNNER_TEMP                = $null
             Push-Location $TestDrive
-            # This will throw because no vcpkg root exists — that's expected before WhatIf skips meson
+            # This will throw because no vcpkg root exists - that's expected before WhatIf skips meson
             # The important check: build.ninja must NOT exist afterwards
             try { & $script:ConfigureScript -WhatIf } catch {}
             Test-Path (Join-Path $TestDrive 'build/build.ninja') | Should -Be $false

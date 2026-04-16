@@ -31,7 +31,7 @@ $postgresExe = Get-ChildItem -Path $DestDir -Recurse -Filter 'postgres.exe' `
                Select-Object -First 1
 
 if (-not $postgresExe) {
-    Write-Warning "postgres.exe not found under $DestDir — skipping runtime DLL copy"
+    Write-Warning "postgres.exe not found under $DestDir - skipping runtime DLL copy"
     return
 }
 

@@ -4,7 +4,7 @@ BeforeAll {
 
 Describe 'test.ps1' {
     It 'applies default parameter values' {
-        # Capture the command line via -WhatIf output — test.ps1 doesn't support ShouldProcess,
+        # Capture the command line via -WhatIf output - test.ps1 doesn't support ShouldProcess,
         # so instead verify defaults by running against a non-existent build dir (meson will fail)
         # and checking that LASTEXITCODE is set (non-zero) rather than an exception thrown.
         $threw = $false
