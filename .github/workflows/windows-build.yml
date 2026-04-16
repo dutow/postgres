@@ -53,7 +53,7 @@ jobs:
         shell: pwsh
         run: |
           Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0
-          $result = Invoke-Pester -Path ci/windows/scripts/Tests -PassThru
+          $result = Invoke-Pester -Path ci/windows/scripts/Tests, ci/windows/installer/CustomActions/Tests -PassThru
           if ($result.FailedCount -gt 0) { exit 1 }
 
       - name: Install flex and bison
