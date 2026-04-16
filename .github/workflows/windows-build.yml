@@ -83,7 +83,7 @@ jobs:
         timeout-minutes: 50
         continue-on-error: true
         run: |
-          ./ci/windows/scripts/test.ps1
+          ./ci/windows/scripts/test.ps1 -Suite setup,regress
           exit $LASTEXITCODE
 
       - name: Upload test logs
