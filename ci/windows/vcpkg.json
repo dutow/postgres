@@ -4,6 +4,7 @@
   "version-string": "18.0.0",
   "description": "Build-time dependencies for Percona Server for PostgreSQL on Windows",
   "dependencies": [
+    "curl",
     "openssl",
     "icu",
     "zlib",
