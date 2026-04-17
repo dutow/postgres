@@ -44,7 +44,8 @@ foreach ($f in $files) {
 
 # Deterministic ID from a relative path
 function Make-Id([string]$prefix, [string]$relPath) {
-    $safe = $relPath -replace '[^A-Za-z0-9._]', '_'
+    # Preserve +/- distinctly so paths like Etc/GMT+3 vs Etc/GMT-3 don't collide
+    $safe = $relPath -replace '\+', 'P' -replace '-', 'M' -replace '[^A-Za-z0-9._]', '_'
     # WiX IDs must start with a letter or underscore and be <= 72 chars
     $id = "${prefix}_${safe}"
     if ($id.Length -gt 72) {

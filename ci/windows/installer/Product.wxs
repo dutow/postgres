@@ -17,9 +17,9 @@
 
     <Property Id="DATADIR"            Value="C:\Program Files\Percona\PostgreSQL\18\data" />
     <Property Id="PGPORT"             Value="5432" />
-    <Property Id="PGLOCALE"           Value="" />
-    <Property Id="PGPASSWORD"         Value="" />
-    <Property Id="PGPASSWORD_CONFIRM" Value="" />
+    <Property Id="PGLOCALE"           Secure="yes" />
+    <Property Id="PGPASSWORD"         Hidden="yes" />
+    <Property Id="PGPASSWORD_CONFIRM" Hidden="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="PerconaDir" Name="Percona">
@@ -33,11 +33,11 @@
       <ComponentGroupRef Id="StagedFiles" />
     </Feature>
 
-    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
-    <WixVariable Id="WixUIBannerBmp"  Value="Banner.bmp" />
-    <WixVariable Id="WixUIDialogBmp"  Value="Dialog.bmp" />
+    <WixVariable Id="WixUILicenseRtf"          Value="License.rtf" />
+    <WixVariable Id="WixUIBannerBmp"           Value="Banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp"           Value="Dialog.bmp" />
+    <WixVariable Id="WixUICostingPopupOptOut"  Value="1" />
 
-    <ui:WixUI Id="PerconaPgUI" />
-    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR_" />
+    <UIRef Id="PerconaPgUI" />
   </Package>
 </Wix>
