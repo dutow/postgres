@@ -17,6 +17,9 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 90
 
+    permissions:
+      contents: write
+
     env:
       VCPKG_DEFAULT_TRIPLET: x64-windows
       VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
@@ -202,3 +205,20 @@ jobs:
             pg_tde_build/testrun/**/regress_log/**
           retention-days: 14
           if-no-files-found: ignore
+
+      - name: Publish rolling release
+        if: success() && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}-latest
+          name: ${{ github.ref_name }} (latest build)
+          body: |
+            Rolling build from branch `${{ github.ref_name }}`.
+
+            Commit: ${{ github.sha }}
+            Updated: automatically on every successful push.
+          prerelease: true
+          files: |
+            ${{ steps.msi_version.outputs.artifact_name }}
+            ${{ steps.msi_version.outputs.zip_name }}
+          fail_on_unmatched_files: true
