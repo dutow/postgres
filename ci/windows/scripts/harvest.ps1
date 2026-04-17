@@ -76,8 +76,13 @@ $fragment.AppendChild($rootRef) | Out-Null
 # Create nested Directory elements
 $dirElements = @{ '' = $rootRef }
 foreach ($d in ($dirs.Keys | Sort-Object)) {
-    $parentPath = if ($d.Contains('\')) { $d.Substring(0, $d.LastIndexOf('\')) } else { '' }
-    $name = if ($d.Contains('\')) { $d.Substring($d.LastIndexOf('\') + 1) } else { $d }
+    if ($d.Contains('\')) {
+        $parentPath = $d.Substring(0, $d.LastIndexOf('\'))
+        $name = $d.Substring($d.LastIndexOf('\') + 1)
+    } else {
+        $parentPath = ''
+        $name = $d
+    }
     $dirEl = $xml.CreateElement("Directory", $ns)
     $dirEl.SetAttribute("Id", (Make-Id "dir" $d))
     $dirEl.SetAttribute("Name", $name)
@@ -101,7 +106,8 @@ foreach ($f in $files) {
     $comp = $xml.CreateElement("Component", $ns)
     $comp.SetAttribute("Id", $compId)
     $comp.SetAttribute("Guid", [Guid]::NewGuid().ToString("D"))
-    $comp.SetAttribute("Directory", (if ($relDir -eq '') { $DirectoryRef } else { Make-Id "dir" $relDir }))
+    $dirId = if ($relDir -eq '') { $DirectoryRef } else { Make-Id "dir" $relDir }
+    $comp.SetAttribute("Directory", $dirId)
 
     $fileEl = $xml.CreateElement("File", $ns)
     $fileEl.SetAttribute("Id", $fileId)
