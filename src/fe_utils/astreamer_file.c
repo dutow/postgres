@@ -35,6 +35,7 @@ typedef struct astreamer_extractor
 	char	   *basepath;
 	const char *(*link_map) (const char *);
 	void		(*report_output_file) (const char *);
+	const SimpleStringList *allowed_roots;
 	char		filename[MAXPGPATH];
 	FILE	   *file;
 } astreamer_extractor;
@@ -61,6 +62,8 @@ static void astreamer_extractor_free(astreamer *streamer);
 static void extract_directory(const char *filename, mode_t mode);
 static void extract_link(const char *filename, const char *linktarget);
 static FILE *create_file_for_extract(const char *filename, mode_t mode);
+static bool path_is_under_allowed_root(const char *path,
+									   const SimpleStringList *allowed_roots);
 
 static const astreamer_ops astreamer_extractor_ops = {
 	.content = astreamer_extractor_content,
@@ -185,7 +188,8 @@ astreamer_plain_writer_free(astreamer *streamer)
 astreamer *
 astreamer_extractor_new(const char *basepath,
 						const char *(*link_map) (const char *),
-						void (*report_output_file) (const char *))
+						void (*report_output_file) (const char *),
+						const SimpleStringList *allowed_roots)
 {
 	astreamer_extractor *streamer;
 
@@ -195,6 +199,7 @@ astreamer_extractor_new(const char *basepath,
 	streamer->basepath = pstrdup(basepath);
 	streamer->link_map = link_map;
 	streamer->report_output_file = report_output_file;
+	streamer->allowed_roots = allowed_roots;
 
 	return &streamer->base;
 }
@@ -251,6 +256,22 @@ astreamer_extractor_content(astreamer *streamer, astreamer_member *member,
 					pg_fatal("link target has unsafe path name: \"%s\"",
 							 member->linktarget);
 				}
+
+				/*
+				 * Symlink targets must point at one of the allow-listed
+				 * roots (or somewhere inside them). The legitimate cases are
+				 * pg_tblspc/<oid> -> a tablespace location the server
+				 * announced in the BASE_BACKUP header, which the receiver
+				 * has just verified and created. Anything else means the
+				 * server is asking us to plant a symlink that lets it (or
+				 * later files in this stream) write outside the data
+				 * directory and known tablespaces.
+				 */
+				if (mystreamer->allowed_roots != NULL &&
+					!path_is_under_allowed_root(linktarget,
+												mystreamer->allowed_roots))
+					pg_fatal("symbolic link \"%s\" target \"%s\" is not under any allowed destination directory",
+							 member->pathname, linktarget);
 
 				extract_link(mystreamer->filename, linktarget);
 			}
@@ -410,4 +431,28 @@ astreamer_extractor_free(astreamer *streamer)
 
 	pfree(mystreamer->basepath);
 	pfree(mystreamer);
+}
+
+/*
+ * Return true if `path' is lexically equal to, or a descendant of, one of
+ * the allow-listed canonical roots in `allowed_roots'. `path' is
+ * canonicalized via a private copy using canonicalize_path(), which
+ * collapses ".." and redundant slashes.
+ */
+static bool
+path_is_under_allowed_root(const char *path,
+						   const SimpleStringList *allowed_roots)
+{
+	char		canonical[MAXPGPATH];
+	SimpleStringListCell *cell;
+
+	strlcpy(canonical, path, sizeof(canonical));
+	canonicalize_path(canonical);
+
+	for (cell = allowed_roots->head; cell != NULL; cell = cell->next)
+	{
+		if (path_is_prefix_of_path(cell->val, canonical))
+			return true;
+	}
+	return false;
 }

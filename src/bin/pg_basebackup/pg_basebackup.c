@@ -163,6 +163,12 @@ static bool found_existing_xlogdir = false;
 static bool made_tablespace_dirs = false;
 static bool found_tablespace_dirs = false;
 
+/*
+ * Canonical absolute paths of every destination directory we are willing to
+ * write into during extraction.
+ */
+static SimpleStringList allowed_extract_roots;
+
 /* Progress indicators */
 static uint64 totalsize_kb;
 static uint64 totaldone;
@@ -1163,7 +1169,8 @@ CreateBackupStreamer(char *archive_name, char *spclocation,
 			directory = get_tablespace_mapping(spclocation);
 		streamer = astreamer_extractor_new(directory,
 										   get_tablespace_mapping,
-										   progress_update_filename);
+										   progress_update_filename,
+										   &allowed_extract_roots);
 	}
 	else
 	{
@@ -2055,6 +2062,20 @@ BaseBackup(char *compression_algorithm, char *compression_detail,
 	 */
 	totalsize_kb = totaldone = 0;
 	tablespacecount = PQntuples(res);
+
+	/*
+	 * Seed the allow-list of canonical destination roots we are willing to
+	 * write into when extracting.
+	 */
+	if (backup_target == NULL && format == 'p')
+	{
+		char	   *canon = pg_strdup(basedir);
+
+		canonicalize_path(canon);
+		simple_string_list_append(&allowed_extract_roots, canon);
+		pg_free(canon);
+	}
+
 	for (i = 0; i < PQntuples(res); i++)
 	{
 		totalsize_kb += atoll(PQgetvalue(res, i, 2));
@@ -2072,16 +2093,22 @@ BaseBackup(char *compression_algorithm, char *compression_detail,
 		if (backup_target == NULL && format == 'p' && !PQgetisnull(res, i, 1))
 		{
 			char	   *path = PQgetvalue(res, i, 1);
+			char	   *local_path;
 
 			if (is_absolute_path(path))
-				path = unconstify(char *, get_tablespace_mapping(path));
+				local_path = pg_strdup(get_tablespace_mapping(path));
 			else
 			{
 				/* This is an in-place tablespace, so prepend basedir. */
-				path = psprintf("%s/%s", basedir, path);
+				local_path = psprintf("%s/%s", basedir, path);
 			}
 
-			verify_dir_is_empty_or_create(path, &made_tablespace_dirs, &found_tablespace_dirs);
+			verify_dir_is_empty_or_create(local_path, &made_tablespace_dirs, &found_tablespace_dirs);
+
+			/* Add the canonical local path to the extractor allow-list. */
+			canonicalize_path(local_path);
+			simple_string_list_append(&allowed_extract_roots, local_path);
+			pg_free(local_path);
 		}
 	}
 

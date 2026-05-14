@@ -32,6 +32,7 @@
 #define ASTREAMER_H
 
 #include "common/compression.h"
+#include "fe_utils/simple_list.h"
 #include "lib/stringinfo.h"
 #include "pqexpbuffer.h"
 
@@ -215,7 +216,8 @@ extern astreamer *astreamer_gzip_writer_new(char *pathname, FILE *file,
 											pg_compress_specification *compress);
 extern astreamer *astreamer_extractor_new(const char *basepath,
 										  const char *(*link_map) (const char *),
-										  void (*report_output_file) (const char *));
+										  void (*report_output_file) (const char *),
+										  const SimpleStringList *allowed_roots);
 
 extern astreamer *astreamer_gzip_decompressor_new(astreamer *next);
 extern astreamer *astreamer_lz4_compressor_new(astreamer *next,
