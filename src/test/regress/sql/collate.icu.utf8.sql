@@ -826,6 +826,82 @@ EXPLAIN (COSTS OFF)
 SELECT x, count(*) FROM test3cs GROUP BY x HAVING x = 'abc' COLLATE case_insensitive ORDER BY 1;
 SELECT x, count(*) FROM test3cs GROUP BY x HAVING x = 'abc' COLLATE case_insensitive ORDER BY 1;
 
+-- Test WHERE-pushdown past a grouping layer (DISTINCT, DISTINCT ON, window
+-- PARTITION BY) when the qual applies a different collation than the
+-- grouping column's nondeterministic collation.  The qual would distinguish
+-- rows the grouping considers equal, so it must NOT be pushed inside the
+-- subquery.
+CREATE TABLE pushdown_ci (id int, x text COLLATE case_insensitive);
+INSERT INTO pushdown_ci VALUES (1, 'ABC'), (2, 'abc'), (3, 'def');
+
+-- DISTINCT ON: conflict, qual stays in outer query
+EXPLAIN (COSTS OFF)
+SELECT * FROM (SELECT DISTINCT ON (x) id, x FROM pushdown_ci ORDER BY x, id) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+SELECT * FROM (SELECT DISTINCT ON (x) id, x FROM pushdown_ci ORDER BY x, id) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+-- Window function PARTITION BY: conflict, qual stays outside the WindowAgg
+EXPLAIN (COSTS OFF)
+SELECT * FROM (
+  SELECT id, x, count(*) OVER (PARTITION BY x) AS cnt FROM pushdown_ci
+) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+SELECT * FROM (
+  SELECT id, x, count(*) OVER (PARTITION BY x) AS cnt FROM pushdown_ci
+) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+-- Plain DISTINCT: conflict, qual stays in outer query
+EXPLAIN (COSTS OFF)
+SELECT * FROM (SELECT DISTINCT x FROM pushdown_ci) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+SELECT * FROM (SELECT DISTINCT x FROM pushdown_ci) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+-- Positive: matching collation, safe to push past the grouping
+EXPLAIN (COSTS OFF)
+SELECT * FROM (SELECT DISTINCT ON (x) id, x FROM pushdown_ci ORDER BY x, id) s
+WHERE x = 'abc' COLLATE case_insensitive;
+
+SELECT * FROM (SELECT DISTINCT ON (x) id, x FROM pushdown_ci ORDER BY x, id) s
+WHERE x = 'abc' COLLATE case_insensitive;
+
+-- Set operations: any operation other than UNION ALL groups rows by equality,
+-- so the same collation-mismatch rules apply.
+CREATE TABLE pushdown_ci2 (x text COLLATE case_insensitive);
+INSERT INTO pushdown_ci2 VALUES ('abc');
+
+-- UNION: conflict, qual stays in outer query
+EXPLAIN (COSTS OFF)
+SELECT * FROM (SELECT x FROM pushdown_ci UNION SELECT x FROM pushdown_ci2) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+SELECT * FROM (SELECT x FROM pushdown_ci UNION SELECT x FROM pushdown_ci2) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+-- INTERSECT: same
+EXPLAIN (COSTS OFF)
+SELECT * FROM (SELECT x FROM pushdown_ci INTERSECT SELECT x FROM pushdown_ci2) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+SELECT * FROM (SELECT x FROM pushdown_ci INTERSECT SELECT x FROM pushdown_ci2) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+-- INTERSECT ALL: still groups
+EXPLAIN (COSTS OFF)
+SELECT * FROM (SELECT x FROM pushdown_ci INTERSECT ALL SELECT x FROM pushdown_ci2) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+SELECT * FROM (SELECT x FROM pushdown_ci INTERSECT ALL SELECT x FROM pushdown_ci2) s
+WHERE x = 'abc' COLLATE case_sensitive;
+
+DROP TABLE pushdown_ci2;
+DROP TABLE pushdown_ci;
+
 -- bpchar
 CREATE TABLE test1bpci (x char(3) COLLATE case_insensitive);
 CREATE TABLE test2bpci (x char(3) COLLATE case_insensitive);

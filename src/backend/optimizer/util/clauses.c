@@ -100,6 +100,18 @@ typedef struct
 	List	   *safe_param_ids; /* PARAM_EXEC Param IDs to treat as safe */
 } max_parallel_hazard_context;
 
+/*
+ * Walker context for expression_has_grouping_conflict.  cb_context is opaque
+ * to the walker and is forwarded to get_eqop unchanged.
+ */
+typedef struct
+{
+	grouping_eqop_callback get_eqop;
+	void	   *cb_context;
+	List	   *ancestor_collids;	/* inputcollids from collation-aware
+									 * ancestors, pushed/popped as we walk */
+} grouping_walker_ctx;
+
 static bool contain_agg_clause_walker(Node *node, void *context);
 static bool find_window_functions_walker(Node *node, WindowFuncLists *lists);
 static bool contain_subplans_walker(Node *node, void *context);
@@ -118,6 +130,9 @@ static List *find_nonnullable_vars_walker(Node *node, bool top_level);
 static void find_subquery_safe_quals(Node *jtnode, List **safe_quals);
 static bool is_strict_saop(ScalarArrayOpExpr *expr, bool falseOK);
 static bool convert_saop_to_hashed_saop_walker(Node *node, void *context);
+static bool grouping_conflict_walker(Node *node, grouping_walker_ctx *ctx);
+static bool comparison_has_grouping_eqop_conflict(Oid opno, List *args,
+												  grouping_walker_ctx *ctx);
 static Node *eval_const_expressions_mutator(Node *node,
 											eval_const_expressions_context *context);
 static bool contain_non_const_walker(Node *node, void *context);
@@ -6259,6 +6274,270 @@ pull_paramids_walker(Node *node, Bitmapset **context)
 		return false;
 	}
 	return expression_tree_walker(node, pull_paramids_walker, context);
+}
+
+/*
+ * expression_has_grouping_conflict
+ *	  Detect whether 'expr' would distinguish rows that a grouping mechanism
+ *	  (GROUP BY, DISTINCT, DISTINCT ON, or window PARTITION BY) considers
+ *	  equal.
+ *
+ * The caller supplies a get_eqop callback (see clauses.h) so the same walker
+ * serves every grouping context.  For every Var the callback identifies as a
+ * grouping column (by returning a valid eqop), we look for two kinds of
+ * conflict.
+ *
+ * An opfamily conflict arises when a comparison-bearing node takes the Var as
+ * a direct operand and uses an operator from a different btree/hash opfamily
+ * than the grouping eqop.  A type may belong to multiple btree opfamilies
+ * whose equality operators disagree, and using a different family would split
+ * rows the grouping considers equal.
+ *
+ * A collation conflict arises when the Var's varcollid is nondeterministic and
+ * some collation-aware ancestor in the expression tree applies a different
+ * inputcollid: that operator would distinguish values the grouping considers
+ * equal.
+ *
+ * Returns true if any such conflict exists.
+ */
+bool
+expression_has_grouping_conflict(Node *expr,
+								 grouping_eqop_callback get_eqop,
+								 void *context)
+{
+	grouping_walker_ctx ctx;
+	bool		result;
+
+	if (expr == NULL)
+		return false;
+
+	ctx.get_eqop = get_eqop;
+	ctx.cb_context = context;
+	ctx.ancestor_collids = NIL;
+
+	result = grouping_conflict_walker(expr, &ctx);
+
+	Assert(ctx.ancestor_collids == NIL);
+
+	return result;
+}
+
+/*
+ * Walker function for expression_has_grouping_conflict.
+ *
+ * Walks the expression top-down, maintaining a stack of inputcollids
+ * contributed by collation-aware ancestors.  At each Var, perform the
+ * collation conflict check; at each comparison-bearing node, perform the
+ * opfamily conflict check on its direct Var operands.  Most nodes expose
+ * their inputcollid via exprInputCollation(), so the default branch handles
+ * them by pushing the collation, recursing, and popping.  Two structural
+ * exceptions need special handling:
+ *
+ * - RowCompareExpr carries one opno and one inputcollid per column.  We
+ *   check each column's opno against its direct Vars, then descend into
+ *   the (largs[i], rargs[i]) pair with the matching collation pushed.
+ *
+ * - A simple CASE (CaseExpr with a non-NULL arg) holds the arg outside the
+ *   WHEN's OpExpr, even though the WHEN's OpExpr is the place where the
+ *   comparison's inputcollid lives.  Parse analysis builds each WHEN as
+ *   "OpExpr(CaseTestExpr op val)" -- the CaseTestExpr is a placeholder for
+ *   the arg.  Before walking cexpr->arg we therefore push every WHEN's
+ *   inputcollid onto the ancestor stack, so a grouping-column at the arg is
+ *   checked against the same collations the WHEN comparisons would apply.
+ *   The WHEN bodies and defresult are then walked under the unchanged stack
+ *   so their own collation contexts are picked up by the default path.
+ */
+static bool
+grouping_conflict_walker(Node *node, grouping_walker_ctx *ctx)
+{
+	Oid			this_collid;
+	bool		result;
+
+	if (node == NULL)
+		return false;
+
+	if (IsA(node, Var))
+	{
+		Var		   *var = (Var *) node;
+
+		if (OidIsValid(ctx->get_eqop(var, ctx->cb_context)) &&
+			OidIsValid(var->varcollid) &&
+			!get_collation_isdeterministic(var->varcollid))
+		{
+			foreach_oid(collid, ctx->ancestor_collids)
+			{
+				if (collid != var->varcollid)
+					return true;
+			}
+		}
+		return false;
+	}
+	else if (IsA(node, OpExpr))
+	{
+		OpExpr	   *opexpr = (OpExpr *) node;
+
+		if (comparison_has_grouping_eqop_conflict(opexpr->opno, opexpr->args, ctx))
+			return true;
+		/* fall through to push inputcollid and recurse */
+	}
+	else if (IsA(node, ScalarArrayOpExpr))
+	{
+		ScalarArrayOpExpr *saop = (ScalarArrayOpExpr *) node;
+
+		if (comparison_has_grouping_eqop_conflict(saop->opno, saop->args, ctx))
+			return true;
+		/* fall through */
+	}
+	else if (IsA(node, RowCompareExpr))
+	{
+		RowCompareExpr *rcexpr = (RowCompareExpr *) node;
+		ListCell   *lc_l;
+		ListCell   *lc_r;
+		ListCell   *lc_o;
+		ListCell   *lc_c;
+
+		forfour(lc_l, rcexpr->largs,
+				lc_r, rcexpr->rargs,
+				lc_o, rcexpr->opnos,
+				lc_c, rcexpr->inputcollids)
+		{
+			Oid			opno = lfirst_oid(lc_o);
+			Oid			collid = lfirst_oid(lc_c);
+			List	   *pair = list_make2(lfirst(lc_l), lfirst(lc_r));
+			bool		conflict;
+			bool		found;
+
+			/* opfamily check at this column's opno */
+			conflict = comparison_has_grouping_eqop_conflict(opno, pair, ctx);
+			list_free(pair);
+			if (conflict)
+				return true;
+
+			/*
+			 * Each column of a row comparison is compared under its own
+			 * inputcollids[i].  Walk each (largs[i], rargs[i]) pair with that
+			 * collation pushed, so a Var in column i is checked against the
+			 * collation that actually applies to it.
+			 */
+			if (OidIsValid(collid))
+				ctx->ancestor_collids = lappend_oid(ctx->ancestor_collids,
+													collid);
+
+			found = grouping_conflict_walker((Node *) lfirst(lc_l), ctx) ||
+				grouping_conflict_walker((Node *) lfirst(lc_r), ctx);
+
+			if (OidIsValid(collid))
+				ctx->ancestor_collids =
+					list_delete_last(ctx->ancestor_collids);
+
+			if (found)
+				return true;
+		}
+		return false;
+	}
+	else if (IsA(node, CaseExpr) && ((CaseExpr *) node)->arg != NULL)
+	{
+		CaseExpr   *cexpr = (CaseExpr *) node;
+		int			saved_len = list_length(ctx->ancestor_collids);
+		bool		found;
+
+		/*
+		 * Push every WHEN's inputcollid before walking cexpr->arg, since each
+		 * WHEN implicitly compares the arg under that inputcollid.
+		 */
+		foreach_node(CaseWhen, cw, cexpr->args)
+		{
+			Oid			collid = exprInputCollation((Node *) cw->expr);
+
+			if (OidIsValid(collid))
+				ctx->ancestor_collids = lappend_oid(ctx->ancestor_collids,
+													collid);
+		}
+
+		found = grouping_conflict_walker((Node *) cexpr->arg, ctx);
+
+		ctx->ancestor_collids = list_truncate(ctx->ancestor_collids,
+											  saved_len);
+
+		if (found)
+			return true;
+
+		/*
+		 * Walk the WHEN bodies and defresult under the unchanged ancestor
+		 * stack; any inputcollids inside them are picked up by the default
+		 * path.
+		 */
+		foreach_node(CaseWhen, cw, cexpr->args)
+		{
+			if (grouping_conflict_walker((Node *) cw->expr, ctx) ||
+				grouping_conflict_walker((Node *) cw->result, ctx))
+				return true;
+		}
+		return grouping_conflict_walker((Node *) cexpr->defresult, ctx);
+	}
+
+	this_collid = exprInputCollation(node);
+	if (OidIsValid(this_collid))
+		ctx->ancestor_collids = lappend_oid(ctx->ancestor_collids,
+											this_collid);
+
+	result = expression_tree_walker(node, grouping_conflict_walker, ctx);
+
+	if (OidIsValid(this_collid))
+		ctx->ancestor_collids = list_delete_last(ctx->ancestor_collids);
+
+	return result;
+}
+
+/*
+ * comparison_has_grouping_eqop_conflict
+ *	  Per-comparison helper: ask the callback whether each Var operand of
+ *	  (opno, args) is a grouping column, and if so verify that 'opno' is
+ *	  equality-compatible with the callback-reported grouping eqop.
+ *
+ * Strips RelabelType wrappers so const-folded CollateExpr leaves don't hide
+ * the underlying Var.  Operators not in any btree/hash opfamily are skipped
+ * (see the header comment on op_is_safe_index_member).
+ *
+ * The check is symmetric: any cross-opfamily comparison is rejected.  In
+ * principle a qual operator from an opfamily whose equality is coarser than
+ * the grouping eqop could still be applied safely, since a coarser equality
+ * unions whole grouping classes together rather than splitting them.  But we
+ * have no machinery to detect such a refinement relation between opfamilies,
+ * and the case does not arise in practice since the grouping eqop is always
+ * the column type's default.
+ */
+static bool
+comparison_has_grouping_eqop_conflict(Oid opno, List *args,
+									  grouping_walker_ctx *ctx)
+{
+	ListCell   *lc;
+
+	if (!OidIsValid(opno) || !op_is_safe_index_member(opno))
+		return false;
+
+	foreach(lc, args)
+	{
+		Node	   *arg = (Node *) lfirst(lc);
+		Var		   *var;
+		Oid			grouping_eqop;
+
+		if (arg && IsA(arg, RelabelType))
+			arg = (Node *) ((RelabelType *) arg)->arg;
+
+		if (arg == NULL || !IsA(arg, Var))
+			continue;
+
+		var = (Var *) arg;
+		grouping_eqop = ctx->get_eqop(var, ctx->cb_context);
+		if (!OidIsValid(grouping_eqop))
+			continue;
+
+		if (!equality_ops_are_compatible(opno, grouping_eqop))
+			return true;
+	}
+
+	return false;
 }
 
 /*
