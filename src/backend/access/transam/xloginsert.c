@@ -1076,7 +1076,7 @@ XLogEncryptRecordBody(XLogRecData *rdt)
 	cipher_len = body_len + WAL_GCM_OVERHEAD;
 
 	ensure_wal_enc_buf(&wal_enc_flat_buf, &wal_enc_flat_bufsz,
-					   Max(body_len, 1));
+					   Max(body_len, 1));	/* avoid palloc(0) for zero-body records */
 	ensure_wal_enc_buf(&wal_enc_cipher_buf, &wal_enc_cipher_bufsz,
 					   Max(cipher_len, 1));
 
@@ -1111,6 +1111,7 @@ XLogEncryptRecordBody(XLogRecData *rdt)
 
 	/* Reflect ciphertext length in the header. */
 	rechdr->xl_tot_len = (uint32) (SizeOfXLogRecord + cipher_len);
+	Assert(rechdr->xl_tot_len <= XLogRecordMaxSize);
 
 	/* Mark the record as encrypted so XLogReadRecord knows to decrypt. */
 	rechdr->xl_info |= XLR_ENCRYPTED;
