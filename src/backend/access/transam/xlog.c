@@ -55,6 +55,7 @@
 #include "access/timeline.h"
 #include "access/transam.h"
 #include "access/twophase.h"
+#include "access/wal_gcm.h"
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 #include "access/xlogarchive.h"
@@ -5548,6 +5549,29 @@ BootStrapXLOG(uint32 data_checksum_version)
 	memcpy(recptr, &checkPoint, sizeof(checkPoint));
 	recptr += sizeof(checkPoint);
 	Assert(recptr - (char *) record == record->xl_tot_len);
+
+	/*
+	 * The bootstrap checkpoint record bypasses XLogInsert and so does
+	 * not hit XLogEncryptRecordBody.  Encrypt it here so the decrypt
+	 * path in xlogreader.c can verify it like any other WAL record.
+	 * See docs/plans/2026-06-04-wal-perrecord-gcm-prototype-design.md.
+	 */
+	{
+		char	   *body = ((char *) record) + SizeOfXLogRecord;
+		Size		body_len = record->xl_tot_len - SizeOfXLogRecord;
+		char	   *iv_tag = body + body_len;	/* appended in-place */
+
+		WalGcmInit();
+		WalGcmEncryptRecord((const char *) record,
+							body,
+							body,	/* in-place: plaintext overwritten */
+							body_len,
+							iv_tag);
+
+		record->xl_tot_len += (uint32) WAL_GCM_OVERHEAD;
+		Assert(record->xl_tot_len <= XLogRecordMaxSize);
+		record->xl_info |= XLR_ENCRYPTED;
+	}
 
 	INIT_CRC32C(crc);
 	COMP_CRC32C(crc, ((char *) record) + SizeOfXLogRecord, record->xl_tot_len - SizeOfXLogRecord);
