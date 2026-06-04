@@ -14,6 +14,8 @@ backend_sources += files(
   'twophase.c',
   'twophase_rmgr.c',
   'varsup.c',
+  'wal_gcm.c',
+  'wal_gcm_key.c',
   'xact.c',
   'xlog.c',
   'xlogarchive.c',
