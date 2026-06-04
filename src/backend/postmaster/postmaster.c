@@ -89,6 +89,7 @@
 #include <pthread.h>
 #endif
 
+#include "access/wal_gcm.h"
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
 #include "access/xlogrecovery.h"
@@ -1116,6 +1117,7 @@ PostmasterMain(int argc, char *argv[])
 	 */
 	ereport(LOG,
 			(errmsg("starting %s", PG_VERSION_STR)));
+	WalGcmLogVariantAtStartup();
 
 	/*
 	 * Establish input sockets.

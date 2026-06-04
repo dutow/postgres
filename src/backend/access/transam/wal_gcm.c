@@ -62,7 +62,27 @@ WalGcmInit(void)
 void
 WalGcmLogVariantAtStartup(void)
 {
-	/* Phase 3.2 */
+	const char *iv_mode =
+#if WAL_GCM_IV_MODE == 0
+		"RAND_bytes";
+#elif WAL_GCM_IV_MODE == 1
+		"counter+PID";
+#else
+		"unknown";
+#endif
+
+	const char *ctx_mode =
+#if WAL_GCM_CTX_MODE == 0
+		"reuse";
+#elif WAL_GCM_CTX_MODE == 1
+		"per-call";
+#else
+		"unknown";
+#endif
+
+	ereport(LOG,
+			(errmsg("WAL GCM prototype: AES-256-GCM, IV=%s, CTX=%s",
+					iv_mode, ctx_mode)));
 }
 
 void
