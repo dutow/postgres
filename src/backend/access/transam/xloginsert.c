@@ -27,6 +27,7 @@
 #include <zstd.h>
 #endif
 
+#include "access/wal_gcm.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
@@ -116,6 +117,19 @@ static uint8 curinsert_flags = 0;
 static XLogRecData hdr_rdt;
 static char *hdr_scratch = NULL;
 
+/*
+ * Buffers and rdata chain used to encrypt the WAL record body before
+ * insertion.  Both buffers grow monotonically and live in wal_enc_cxt
+ * (allowInCritSection).  Always populated when this backend inserts a
+ * WAL record; encryption is unconditional in the prototype.
+ */
+static MemoryContext wal_enc_cxt = NULL;
+static char *wal_enc_flat_buf = NULL;
+static Size wal_enc_flat_bufsz = 0;
+static char *wal_enc_cipher_buf = NULL;
+static Size wal_enc_cipher_bufsz = 0;
+static XLogRecData wal_enc_chain[2];
+
 #define SizeOfXlogOrigin	(sizeof(ReplOriginId) + sizeof(char))
 #define SizeOfXLogTransactionId	(sizeof(TransactionId) + sizeof(char))
 
@@ -137,6 +151,7 @@ static bool begininsert_called = false;
 /* Memory context to hold the registered buffer and data references. */
 static MemoryContext xloginsert_cxt;
 
+static XLogRecData *XLogEncryptRecordBody(XLogRecData *rdt);
 static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info,
 									   XLogRecPtr RedoRecPtr, bool doPageWrites,
 									   XLogRecPtr *fpw_lsn, int *num_fpi,
@@ -529,6 +544,16 @@ XLogInsert(RmgrId rmid, uint8 info)
 		rdt = XLogRecordAssemble(rmid, info, RedoRecPtr, doPageWrites,
 								 &fpw_lsn, &num_fpi, &fpi_bytes,
 								 &topxid_included);
+
+		/*
+		 * Encrypt the record body in place via the WAL GCM prototype before
+		 * handing the chain to XLogInsertRecord().  Done outside the WAL
+		 * insert lock so concurrent inserters encrypt in parallel and so
+		 * per-record IVs do not serialise on the lock.  Retries call
+		 * XLogRecordAssemble() again from scratch, so re-encryption with a
+		 * fresh IV is safe.
+		 */
+		rdt = XLogEncryptRecordBody(rdt);
 
 		EndPos = XLogInsertRecord(rdt, fpw_lsn, curinsert_flags, num_fpi,
 								  fpi_bytes, topxid_included);
@@ -1011,6 +1036,107 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 }
 
 /*
+ * Ensure the lazily-allocated WAL encryption buffer at *buf has room for at
+ * least `needed` bytes, allocating or growing from wal_enc_cxt as required.
+ * Safe to call inside a critical section because wal_enc_cxt is marked
+ * allowInCritSection.
+ */
+static inline void
+ensure_wal_enc_buf(char **buf, Size *cur_sz, Size needed)
+{
+	if (needed <= *cur_sz)
+		return;
+	if (*buf == NULL)
+		*buf = MemoryContextAlloc(wal_enc_cxt, needed);
+	else
+		*buf = repalloc(*buf, needed);
+	*cur_sz = needed;
+}
+
+/*
+ * Encrypt the body of the XLogRecord returned by XLogRecordAssemble() with
+ * AES-256-GCM and return a fresh two-entry rdata chain pointing at the
+ * plaintext header followed by the ciphertext body with the IV+tag tail
+ * appended.  The WAL GCM prototype always encrypts; there is no
+ * configuration / plugin lookup.
+ */
+static XLogRecData *
+XLogEncryptRecordBody(XLogRecData *rdt)
+{
+	XLogRecord *rechdr;
+	Size		body_len;
+	Size		cipher_len;
+	Size		off;
+	pg_crc32c	crc;
+
+	Assert(rdt != NULL && rdt->len >= SizeOfXLogRecord);
+	rechdr = (XLogRecord *) rdt->data;
+
+	body_len = rechdr->xl_tot_len - SizeOfXLogRecord;
+	cipher_len = body_len + WAL_GCM_OVERHEAD;
+
+	ensure_wal_enc_buf(&wal_enc_flat_buf, &wal_enc_flat_bufsz,
+					   Max(body_len, 1));
+	ensure_wal_enc_buf(&wal_enc_cipher_buf, &wal_enc_cipher_bufsz,
+					   Max(cipher_len, 1));
+
+	/* Flatten the body bytes (everything after the XLogRecord header). */
+	off = 0;
+	if (rdt->len > SizeOfXLogRecord)
+	{
+		Size		first_tail = rdt->len - SizeOfXLogRecord;
+
+		memcpy(wal_enc_flat_buf,
+			   (const char *) rdt->data + SizeOfXLogRecord, first_tail);
+		off = first_tail;
+	}
+	for (XLogRecData *r = rdt->next; r != NULL; r = r->next)
+	{
+		if (r->len == 0)
+			continue;
+		memcpy(wal_enc_flat_buf + off, r->data, r->len);
+		off += r->len;
+	}
+	Assert(off == body_len);
+
+	/*
+	 * Encrypt into wal_enc_cipher_buf: ciphertext lives in [0..body_len),
+	 * IV (12 bytes) and tag (16 bytes) live in [body_len..body_len+28).
+	 */
+	WalGcmEncryptRecord((const char *) rechdr,
+						wal_enc_flat_buf,
+						wal_enc_cipher_buf,
+						body_len,
+						wal_enc_cipher_buf + body_len);
+
+	/* Reflect ciphertext length in the header. */
+	rechdr->xl_tot_len = (uint32) (SizeOfXLogRecord + cipher_len);
+
+	/* Mark the record as encrypted so XLogReadRecord knows to decrypt. */
+	rechdr->xl_info |= XLR_ENCRYPTED;
+
+	/*
+	 * Recompute the partial CRC over the ciphertext + IV+tag tail (matching
+	 * XLogRecordAssemble's INIT/COMP-without-FIN convention).
+	 * XLogInsertRecord finishes the CRC over the header once xl_prev is
+	 * assigned.
+	 */
+	INIT_CRC32C(crc);
+	if (cipher_len > 0)
+		COMP_CRC32C(crc, wal_enc_cipher_buf, cipher_len);
+	rechdr->xl_crc = crc;
+
+	wal_enc_chain[0].data = (char *) rechdr;
+	wal_enc_chain[0].len = SizeOfXLogRecord;
+	wal_enc_chain[0].next = &wal_enc_chain[1];
+	wal_enc_chain[1].data = wal_enc_cipher_buf;
+	wal_enc_chain[1].len = cipher_len;
+	wal_enc_chain[1].next = NULL;
+
+	return &wal_enc_chain[0];
+}
+
+/*
  * Create a compressed version of a backup block image.
  *
  * Returns false if compression fails (i.e., compressed result is actually
@@ -1438,4 +1564,25 @@ InitXLogInsert(void)
 	if (hdr_scratch == NULL)
 		hdr_scratch = MemoryContextAllocZero(xloginsert_cxt,
 											 HEADER_SCRATCH_SIZE);
+
+	/*
+	 * Working context for the WAL GCM flatten + cipher buffers.  Marked
+	 * allowInCritSection because XLogEncryptRecordBody (re)allocs while
+	 * running under a START_CRIT_SECTION from XLogInsert callers.
+	 */
+	if (wal_enc_cxt == NULL)
+	{
+		wal_enc_cxt = AllocSetContextCreate(TopMemoryContext,
+											"WAL encryption",
+											ALLOCSET_DEFAULT_SIZES);
+		MemoryContextAllowInCriticalSection(wal_enc_cxt, true);
+	}
+
+	/*
+	 * Pre-warm the wal_gcm.c side too: WalGcmInit() does an
+	 * AllocSetContextCreate which asserts CritSectionCount == 0, so it
+	 * must be called eagerly here (outside any crit section) rather than
+	 * lazily from WalGcmEncryptRecord on first WAL insert.
+	 */
+	WalGcmInit();
 }
