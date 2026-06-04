@@ -54,6 +54,7 @@
 #include "common/logging.h"
 #include "common/restricted_token.h"
 #include "common/string.h"
+#include "common/wal_gcm.h"
 #include "fe_utils/option_utils.h"
 #include "fe_utils/version.h"
 #include "getopt_long.h"
@@ -1163,6 +1164,41 @@ WriteEmptyXLOG(void)
 	*(recptr++) = sizeof(CheckPoint);
 	memcpy(recptr, &ControlFile.checkPointCopy,
 		   sizeof(CheckPoint));
+
+	/*
+	 * The synthetic shutdown-checkpoint record bypasses XLogInsert and so
+	 * does not hit XLogEncryptRecordBody.  Encrypt it here so the decrypt
+	 * path in xlogreader.c can verify it like any other WAL record.  See
+	 * docs/plans/2026-06-04-wal-perrecord-gcm-prototype-design.md.
+	 *
+	 * body_len is captured BEFORE the xl_tot_len mutation so it reflects
+	 * the plaintext body length.  Header mutations happen BEFORE the
+	 * encrypt call because the AAD covers the post-mutation header; the
+	 * decrypt side reads the header as-is on disk.
+	 *
+	 * Body-less records (e.g. XLOG_SWITCH) skip encryption, mirroring the
+	 * logic in XLogEncryptRecordBody.  The synthetic checkpoint always has
+	 * a body (the CheckPoint struct), so the branch is defensive.
+	 */
+	{
+		char	   *body = ((char *) record) + SizeOfXLogRecord;
+		Size		body_len = record->xl_tot_len - SizeOfXLogRecord;
+		char	   *iv_tag = body + body_len;	/* appended in-place */
+
+		if (body_len > 0)
+		{
+			WalGcmInit();
+
+			record->xl_tot_len += (uint32) WAL_GCM_OVERHEAD;
+			record->xl_info |= XLR_ENCRYPTED;
+
+			WalGcmEncryptRecord((const char *) record,
+								body,
+								body,	/* in-place: plaintext overwritten */
+								body_len,
+								iv_tag);
+		}
+	}
 
 	INIT_CRC32C(crc);
 	COMP_CRC32C(crc, ((char *) record) + SizeOfXLogRecord, record->xl_tot_len - SizeOfXLogRecord);
