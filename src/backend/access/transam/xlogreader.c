@@ -31,10 +31,10 @@
 #include "access/xlogrecord.h"
 #include "catalog/pg_control.h"
 #include "common/pg_lzcompress.h"
+#include "common/wal_gcm.h"
 #include "replication/origin.h"
 
 #ifndef FRONTEND
-#include "access/wal_gcm.h"
 #include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "utils/wait_event.h"
@@ -883,10 +883,9 @@ restart:
 		state->NextRecPtr -= XLogSegmentOffset(state->NextRecPtr, state->segcxt.ws_segsize);
 	}
 
-#ifndef FRONTEND
 	/*
 	 * Per-record WAL AES-256-GCM decrypt prototype.  CRC was computed over
-	 * the on-disk ciphertext above, so it has already passed.  Backends are
+	 * the on-disk ciphertext above, so it has already passed.  Builds are
 	 * always-on: every record MUST carry XLR_ENCRYPTED.  Decrypt in place
 	 * (plaintext is shorter than ciphertext by WAL_GCM_OVERHEAD bytes, so
 	 * the slot is large enough), then shrink xl_tot_len and clear the flag
@@ -898,10 +897,9 @@ restart:
 	 *   body[plain_len+12 .. plain_len+28)      GCM tag (16 bytes)
 	 *
 	 * state->NextRecPtr was computed above from the on-disk ciphertext
-	 * total_len, so chaining is unaffected by the in-place shrink.
-	 *
-	 * Frontend builds (pg_waldump, pg_rewind) skip this block for now;
-	 * Task 6.0 moves wal_gcm to src/common and removes the guard.
+	 * total_len, so chaining is unaffected by the in-place shrink.  Both
+	 * backend and frontend (pg_waldump, pg_rewind) take this path; the
+	 * helpers live in src/common.
 	 */
 	if ((record->xl_info & XLR_ENCRYPTED) == 0)
 	{
@@ -975,7 +973,6 @@ restart:
 		record->xl_tot_len = (uint32) (SizeOfXLogRecord + plain_len);
 		record->xl_info &= ~XLR_ENCRYPTED;
 	}
-#endif
 
 	/*
 	 * If we got here without a DecodedXLogRecord, it means we needed to

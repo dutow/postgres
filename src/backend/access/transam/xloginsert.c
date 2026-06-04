@@ -27,13 +27,13 @@
 #include <zstd.h>
 #endif
 
-#include "access/wal_gcm.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
 #include "access/xloginsert.h"
 #include "catalog/pg_control.h"
 #include "common/pg_lzcompress.h"
+#include "common/wal_gcm.h"
 #include "executor/instrument.h"
 #include "miscadmin.h"
 #include "pg_trace.h"

@@ -26,8 +26,6 @@ OBJS = \
 	twophase.o \
 	twophase_rmgr.o \
 	varsup.o \
-	wal_gcm.o \
-	wal_gcm_key.o \
 	xact.o \
 	xlog.o \
 	xlogarchive.o \

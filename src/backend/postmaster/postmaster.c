@@ -89,12 +89,12 @@
 #include <pthread.h>
 #endif
 
-#include "access/wal_gcm.h"
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
 #include "access/xlogrecovery.h"
 #include "common/file_perm.h"
 #include "common/pg_prng.h"
+#include "common/wal_gcm.h"
 #include "lib/ilist.h"
 #include "libpq/libpq.h"
 #include "libpq/pqsignal.h"

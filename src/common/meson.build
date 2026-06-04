@@ -38,6 +38,8 @@ common_sources = files(
   'unicode_norm.c',
   'username.c',
   'wait_error.c',
+  'wal_gcm.c',
+  'wal_gcm_key.c',
   'wchar.c',
 )
 

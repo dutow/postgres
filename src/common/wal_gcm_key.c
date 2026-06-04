@@ -7,8 +7,13 @@
  *
  *-------------------------------------------------------------------------
  */
+#ifndef FRONTEND
 #include "postgres.h"
-#include "access/wal_gcm.h"
+#else
+#include "postgres_fe.h"
+#endif
+
+#include "common/wal_gcm.h"
 
 const unsigned char WalGcmKey[WAL_GCM_KEY_LEN] = {
 	0x6c, 0x73, 0x57, 0x4d, 0x4e, 0x42, 0x76, 0x74,
