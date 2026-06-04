@@ -5562,15 +5562,16 @@ BootStrapXLOG(uint32 data_checksum_version)
 		char	   *iv_tag = body + body_len;	/* appended in-place */
 
 		WalGcmInit();
+
+		record->xl_tot_len += (uint32) WAL_GCM_OVERHEAD;
+		Assert(record->xl_tot_len <= XLogRecordMaxSize);
+		record->xl_info |= XLR_ENCRYPTED;
+
 		WalGcmEncryptRecord((const char *) record,
 							body,
 							body,	/* in-place: plaintext overwritten */
 							body_len,
 							iv_tag);
-
-		record->xl_tot_len += (uint32) WAL_GCM_OVERHEAD;
-		Assert(record->xl_tot_len <= XLogRecordMaxSize);
-		record->xl_info |= XLR_ENCRYPTED;
 	}
 
 	INIT_CRC32C(crc);

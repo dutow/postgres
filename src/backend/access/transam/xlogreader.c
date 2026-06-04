@@ -905,16 +905,24 @@ restart:
 	 */
 	if ((record->xl_info & XLR_ENCRYPTED) == 0)
 	{
-		report_invalid_record(state,
-							  "WAL record at %X/%08X missing XLR_ENCRYPTED flag in encrypted build",
-							  LSN_FORMAT_ARGS(RecPtr));
-		goto err;
+		/*
+		 * Body-less records (e.g. XLOG_SWITCH) are not encrypted on the
+		 * insert side, so they reach us without the flag.  Any other
+		 * record missing the flag indicates corruption.
+		 */
+		if (record->xl_tot_len != SizeOfXLogRecord)
+		{
+			report_invalid_record(state,
+								  "WAL record at %X/%08X missing XLR_ENCRYPTED flag in encrypted build",
+								  LSN_FORMAT_ARGS(RecPtr));
+			goto err;
+		}
 	}
 	else
 	{
-		char	   *body = ((char *) record) + SizeOfXLogRecord;
 		size_t		body_len = record->xl_tot_len - SizeOfXLogRecord;
 		size_t		plain_len;
+		char	   *body;
 		const char *iv;
 		const char *tag;
 
@@ -928,6 +936,27 @@ restart:
 		}
 
 		plain_len = body_len - WAL_GCM_OVERHEAD;
+
+		/*
+		 * Single-page records point into state->readBuf, a page-sized cache
+		 * that ReadPageInternal reuses for subsequent reads of the same LSN
+		 * (e.g. recovery re-reads the checkpoint record while computing the
+		 * end of WAL).  Decrypting in place there would leave plaintext in
+		 * the cache; the second read would then fail ValidXLogRecord's CRC
+		 * check (CRC was computed over on-disk ciphertext).  Stage the
+		 * record into state->readRecordBuf (a per-record private buffer
+		 * rebuilt on every read) and decrypt there.  Multi-page records
+		 * already live in readRecordBuf.
+		 */
+		if (!assembled)
+		{
+			if (state->readRecordBufSize < record->xl_tot_len)
+				allocate_recordbuf(state, record->xl_tot_len);
+			memcpy(state->readRecordBuf, record, record->xl_tot_len);
+			record = (XLogRecord *) state->readRecordBuf;
+		}
+
+		body = ((char *) record) + SizeOfXLogRecord;
 		iv = body + plain_len;
 		tag = body + plain_len + WAL_GCM_IV_LEN;
 

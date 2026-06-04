@@ -1073,6 +1073,16 @@ XLogEncryptRecordBody(XLogRecData *rdt)
 	rechdr = (XLogRecord *) rdt->data;
 
 	body_len = rechdr->xl_tot_len - SizeOfXLogRecord;
+
+	/*
+	 * Skip encryption for body-less records (e.g. XLOG_SWITCH).  Downstream
+	 * CopyXLogRecordToWAL asserts xl_tot_len == SizeOfXLogRecord exactly for
+	 * such records.  Decrypt side passes them through when XLR_ENCRYPTED is
+	 * absent and body_len == 0.
+	 */
+	if (body_len == 0)
+		return rdt;
+
 	cipher_len = body_len + WAL_GCM_OVERHEAD;
 
 	ensure_wal_enc_buf(&wal_enc_flat_buf, &wal_enc_flat_bufsz,
@@ -1099,22 +1109,23 @@ XLogEncryptRecordBody(XLogRecData *rdt)
 	}
 	Assert(off == body_len);
 
-	/*
-	 * Encrypt into wal_enc_cipher_buf: ciphertext lives in [0..body_len),
-	 * IV (12 bytes) and tag (16 bytes) live in [body_len..body_len+28).
-	 */
-	WalGcmEncryptRecord((const char *) rechdr,
-						wal_enc_flat_buf,
-						wal_enc_cipher_buf,
-						body_len,
-						wal_enc_cipher_buf + body_len);
-
 	/* Reflect ciphertext length in the header. */
 	rechdr->xl_tot_len = (uint32) (SizeOfXLogRecord + cipher_len);
 	Assert(rechdr->xl_tot_len <= XLogRecordMaxSize);
 
 	/* Mark the record as encrypted so XLogReadRecord knows to decrypt. */
 	rechdr->xl_info |= XLR_ENCRYPTED;
+
+	/*
+	 * Encrypt into wal_enc_cipher_buf: ciphertext lives in [0..body_len),
+	 * IV (12 bytes) and tag (16 bytes) live in [body_len..body_len+28).
+	 * AAD covers the post-mutation header so encrypt and decrypt agree.
+	 */
+	WalGcmEncryptRecord((const char *) rechdr,
+						wal_enc_flat_buf,
+						wal_enc_cipher_buf,
+						body_len,
+						wal_enc_cipher_buf + body_len);
 
 	/*
 	 * Recompute the partial CRC over the ciphertext + IV+tag tail (matching
