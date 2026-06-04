@@ -91,6 +91,15 @@ typedef struct XLogRecord
 #define XLR_CHECK_CONSISTENCY	0x02
 
 /*
+ * Marks a WAL record whose body has been encrypted by the v2
+ * encryption plugin.  Set by XLogInsertRecord when WAL encryption is
+ * active and the body is non-empty; recovery decrypts the body before
+ * dispatching to rmgr redo only when this bit is set.  Living in the
+ * 0x0F window (XLR_INFO_MASK) reserved for XLogInsert-internal flags.
+ */
+#define XLR_ENCRYPTED			0x04
+
+/*
  * Header info for block data appended to an XLOG record.
  *
  * 'data_length' is the length of the rmgr-specific payload data associated
