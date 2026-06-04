@@ -34,6 +34,7 @@
 #include "replication/origin.h"
 
 #ifndef FRONTEND
+#include "access/wal_gcm.h"
 #include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "utils/wait_event.h"
@@ -881,6 +882,71 @@ restart:
 		state->NextRecPtr += state->segcxt.ws_segsize - 1;
 		state->NextRecPtr -= XLogSegmentOffset(state->NextRecPtr, state->segcxt.ws_segsize);
 	}
+
+#ifndef FRONTEND
+	/*
+	 * Per-record WAL AES-256-GCM decrypt prototype.  CRC was computed over
+	 * the on-disk ciphertext above, so it has already passed.  Backends are
+	 * always-on: every record MUST carry XLR_ENCRYPTED.  Decrypt in place
+	 * (plaintext is shorter than ciphertext by WAL_GCM_OVERHEAD bytes, so
+	 * the slot is large enough), then shrink xl_tot_len and clear the flag
+	 * so DecodeXLogRecord and downstream consumers see a normal record.
+	 *
+	 * Body layout on disk:
+	 *   body[0 .. plain_len)                    ciphertext
+	 *   body[plain_len .. plain_len+12)         IV (12 bytes)
+	 *   body[plain_len+12 .. plain_len+28)      GCM tag (16 bytes)
+	 *
+	 * state->NextRecPtr was computed above from the on-disk ciphertext
+	 * total_len, so chaining is unaffected by the in-place shrink.
+	 *
+	 * Frontend builds (pg_waldump, pg_rewind) skip this block for now;
+	 * Task 6.0 moves wal_gcm to src/common and removes the guard.
+	 */
+	if ((record->xl_info & XLR_ENCRYPTED) == 0)
+	{
+		report_invalid_record(state,
+							  "WAL record at %X/%08X missing XLR_ENCRYPTED flag in encrypted build",
+							  LSN_FORMAT_ARGS(RecPtr));
+		goto err;
+	}
+	else
+	{
+		char	   *body = ((char *) record) + SizeOfXLogRecord;
+		size_t		body_len = record->xl_tot_len - SizeOfXLogRecord;
+		size_t		plain_len;
+		const char *iv;
+		const char *tag;
+
+		if (body_len < WAL_GCM_OVERHEAD)
+		{
+			report_invalid_record(state,
+								  "WAL record at %X/%08X body too short for GCM overhead (%zu < %u)",
+								  LSN_FORMAT_ARGS(RecPtr),
+								  body_len, (unsigned) WAL_GCM_OVERHEAD);
+			goto err;
+		}
+
+		plain_len = body_len - WAL_GCM_OVERHEAD;
+		iv = body + plain_len;
+		tag = body + plain_len + WAL_GCM_IV_LEN;
+
+		if (!WalGcmDecryptRecord((const char *) record,
+								 body,
+								 plain_len,
+								 iv,
+								 tag))
+		{
+			report_invalid_record(state,
+								  "WAL GCM tag mismatch at %X/%08X",
+								  LSN_FORMAT_ARGS(RecPtr));
+			goto err;
+		}
+
+		record->xl_tot_len = (uint32) (SizeOfXLogRecord + plain_len);
+		record->xl_info &= ~XLR_ENCRYPTED;
+	}
+#endif
 
 	/*
 	 * If we got here without a DecodedXLogRecord, it means we needed to
