@@ -6,6 +6,7 @@ tests += {
   'bd': meson.current_build_dir(),
   'tap': {
     'tests': [
+      't/001_wal_is_encrypted.pl',
     ],
     # Requires a cluster built with one of the per-record GCM variants,
     # which is a compile-time choice, so skip during installcheck.
