@@ -1300,7 +1300,9 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
 			 * Write what fits on this page, and continue on the next page.
 			 */
 			Assert(CurrPos % XLOG_BLCKSZ >= SizeOfXLogShortPHD || freespace == 0);
-			memcpy(currpos, rdata_data, freespace);
+			WalPagelevelInsertEncrypt(currpos, rdata_data, freespace,
+									  CurrPos - (CurrPos % XLOG_BLCKSZ),
+									  CurrPos % XLOG_BLCKSZ);
 			rdata_data += freespace;
 			rdata_len -= freespace;
 			written += freespace;
@@ -1335,7 +1337,9 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
 		}
 
 		Assert(CurrPos % XLOG_BLCKSZ >= SizeOfXLogShortPHD || rdata_len == 0);
-		memcpy(currpos, rdata_data, rdata_len);
+		WalPagelevelInsertEncrypt(currpos, rdata_data, rdata_len,
+								  CurrPos - (CurrPos % XLOG_BLCKSZ),
+								  CurrPos % XLOG_BLCKSZ);
 		currpos += rdata_len;
 		CurrPos += rdata_len;
 		freespace -= rdata_len;
