@@ -44,6 +44,7 @@
 #include "catalog/pg_control.h"
 #include "commands/tablespace.h"
 #include "common/file_utils.h"
+#include "common/wal_pagelevel_insert.h"
 #include "miscadmin.h"
 #include "nodes/miscnodes.h"
 #include "pgstat.h"
@@ -3419,6 +3420,13 @@ retry:
 	Assert(targetSegNo == readSegNo);
 	Assert(targetPageOff == readOff);
 	Assert(reqLen <= readLen);
+
+	/*
+	 * Decrypt the page body in place.  Header bytes are plaintext on
+	 * disk and need no decrypt.  Range walker handles the header skip.
+	 */
+	WalPagelevelInsertDecryptRange(readBuf, XLOG_BLCKSZ,
+								   readSegNo, readOff, wal_segment_size);
 
 	xlogreader->seg.ws_tli = curFileTLI;
 
