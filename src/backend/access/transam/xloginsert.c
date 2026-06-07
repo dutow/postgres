@@ -33,6 +33,7 @@
 #include "access/xloginsert.h"
 #include "catalog/pg_control.h"
 #include "common/pg_lzcompress.h"
+#include "common/wal_pagelevel_insert.h"
 #include "executor/instrument.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
@@ -1438,4 +1439,13 @@ InitXLogInsert(void)
 	if (hdr_scratch == NULL)
 		hdr_scratch = MemoryContextAllocZero(xloginsert_cxt,
 											 HEADER_SCRATCH_SIZE);
+
+	/*
+	 * Pre-warm wal_pagelevel_insert.c so its EVP contexts exist before
+	 * any XLogInsertRecord call enters a critical section.  Without
+	 * this, the first AdvanceXLInsertBuffer / CopyXLogRecordToWAL call
+	 * would trip the EVP_CIPHER_CTX_new allocation inside a critical
+	 * section.
+	 */
+	WalPagelevelInsertEnsureCtx();
 }

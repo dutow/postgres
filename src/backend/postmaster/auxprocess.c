@@ -16,6 +16,7 @@
 #include <signal.h>
 
 #include "access/xlog.h"
+#include "common/wal_pagelevel_insert.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/auxprocess.h"
@@ -121,6 +122,13 @@ AuxiliaryProcessMainCommon(void)
 
 	/* register a before-shutdown callback for LWLock cleanup */
 	before_shmem_exit(ShutdownAuxiliaryProcess, 0);
+
+	/*
+	 * Pre-warm wal_pagelevel_insert.c EVP contexts.  Aux processes
+	 * (walwriter, checkpointer, walreceiver, startup) may all hit
+	 * AdvanceXLInsertBuffer or XLogPageRead inside critical sections.
+	 */
+	WalPagelevelInsertEnsureCtx();
 
 	SetProcessingMode(NormalProcessing);
 }
