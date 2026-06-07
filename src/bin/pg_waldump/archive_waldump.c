@@ -20,6 +20,7 @@
 #include "common/file_perm.h"
 #include "common/hashfn.h"
 #include "common/logging.h"
+#include "common/wal_pagelevel_insert.h"
 #include "fe_utils/simple_list.h"
 #include "pg_waldump.h"
 
@@ -349,6 +350,23 @@ read_archive_wal_page(XLogDumpPrivate *privateInfo, XLogRecPtr targetPagePtr,
 
 			copyBytes = Min(nbytes, bufLen - offset);
 			memcpy(p, buf + offset, copyBytes);
+
+			/*
+			 * Body bytes in entry->buf are AES-CTR ciphertext as they
+			 * appear in the source segment file.  Decrypt the copied
+			 * range in place; the range walker skips plaintext header
+			 * bytes for any segment-first page boundary it spans.
+			 */
+			{
+				XLogSegNo	cur_segno;
+				uint32		off_in_seg;
+
+				XLByteToSeg(recptr, cur_segno, segsize);
+				off_in_seg = XLogSegmentOffset(recptr, segsize);
+				WalPagelevelInsertDecryptRange(p, copyBytes,
+											   cur_segno, off_in_seg,
+											   segsize);
+			}
 
 			/* Update state for read */
 			recptr += copyBytes;

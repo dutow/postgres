@@ -14,6 +14,7 @@
 
 #include "access/parallel.h"
 #include "commands/repack.h"
+#include "common/wal_pagelevel_insert.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -845,6 +846,13 @@ BackgroundWorkerMain(const void *startup_data, size_t startup_data_len)
 	 * Early initialization.
 	 */
 	BaseInit();
+
+	/*
+	 * Pre-warm wal_pagelevel_insert.c EVP contexts.  Background workers
+	 * (datachecksums launcher, autovacuum launcher, etc.) may call
+	 * XLogInsertRecord before any other init hook has a chance to fire.
+	 */
+	WalPagelevelInsertEnsureCtx();
 
 	/*
 	 * Look up the entry point function, loading its library if necessary.
