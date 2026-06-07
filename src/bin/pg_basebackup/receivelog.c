@@ -20,6 +20,7 @@
 
 #include "access/xlog_internal.h"
 #include "common/logging.h"
+#include "common/wal_pagelevel_insert.h"
 #include "libpq-fe.h"
 #include "libpq/protocol.h"
 #include "receivelog.h"
@@ -1129,14 +1130,29 @@ ProcessWALDataMsg(PGconn *conn, StreamCtl *stream, char *copybuf, int len,
 			}
 		}
 
-		if (stream->walmethod->ops->write(walfile,
-										  copybuf + hdr_len + bytes_written,
-										  bytes_to_write) != bytes_to_write)
 		{
-			pg_log_error("could not write %d bytes to WAL file \"%s\": %s",
-						 bytes_to_write, walfile->pathname,
-						 GetLastWalMethodError(stream->walmethod));
-			return false;
+			/*
+			 * Encrypt the streamed plaintext body bytes before writing.
+			 * Walsender ships plaintext; the local pg_wal file must hold
+			 * ciphertext so its own XLogPageRead/WALRead paths decrypt
+			 * cleanly.  EncryptRange walks per-page slices and skips
+			 * header bytes for any segment-first page it spans.
+			 */
+			char	   *segdata = copybuf + hdr_len + bytes_written;
+			XLogSegNo	recvSegNo = *blockpos / WalSegSz;
+
+			WalPagelevelInsertEncryptRange(segdata, segdata, bytes_to_write,
+										   recvSegNo, xlogoff, WalSegSz);
+
+			if (stream->walmethod->ops->write(walfile,
+											  segdata,
+											  bytes_to_write) != bytes_to_write)
+			{
+				pg_log_error("could not write %d bytes to WAL file \"%s\": %s",
+							 bytes_to_write, walfile->pathname,
+							 GetLastWalMethodError(stream->walmethod));
+				return false;
+			}
 		}
 
 		/* Write was successful, advance our position */
