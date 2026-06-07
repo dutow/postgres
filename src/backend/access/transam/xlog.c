@@ -5584,6 +5584,16 @@ BootStrapXLOG(uint32 data_checksum_version)
 	 * close the file again in a moment.
 	 */
 
+	/*
+	 * Encrypt the page body before writing.  The header stays plaintext
+	 * (matches the in-memory invariant for all WAL pages).  Bootstrap
+	 * may run before any process-init hook has fired, so ensure the EVP
+	 * context exists.
+	 */
+	WalPagelevelInsertEnsureCtx();
+	WalPagelevelInsertEncryptRange((char *) &buffer, (char *) &buffer,
+								   XLOG_BLCKSZ, 1, 0, wal_segment_size);
+
 	/* Write the first page with the initial record */
 	errno = 0;
 	pgstat_report_wait_start(WAIT_EVENT_WAL_BOOTSTRAP_WRITE);
