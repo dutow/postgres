@@ -50,6 +50,7 @@
 #include "access/xlog_internal.h"
 #include "common/controldata_utils.h"
 #include "common/fe_memutils.h"
+#include "common/wal_pagelevel_insert.h"
 #include "common/file_perm.h"
 #include "common/logging.h"
 #include "common/restricted_token.h"
@@ -1180,6 +1181,14 @@ WriteEmptyXLOG(void)
 			  pg_file_create_mode);
 	if (fd < 0)
 		pg_fatal("could not open file \"%s\": %m", path);
+
+	/*
+	 * Encrypt the page body before writing.  Header stays plaintext.
+	 * This is the first page of a fresh segment, so its LSN is
+	 * (newXlogSegNo * WalSegSz).
+	 */
+	WalPagelevelInsertEncryptRange(buffer.data, buffer.data, XLOG_BLCKSZ,
+								   newXlogSegNo, 0, WalSegSz);
 
 	errno = 0;
 	if (write(fd, buffer.data, XLOG_BLCKSZ) != XLOG_BLCKSZ)

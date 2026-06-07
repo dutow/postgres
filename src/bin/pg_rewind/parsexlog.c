@@ -20,6 +20,7 @@
 #include "catalog/pg_control.h"
 #include "catalog/storage_xlog.h"
 #include "commands/dbcommands_xlog.h"
+#include "common/wal_pagelevel_insert.h"
 #include "fe_utils/archive.h"
 #include "filemap.h"
 #include "pg_rewind.h"
@@ -377,6 +378,15 @@ SimpleXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr,
 	}
 
 	Assert(targetSegNo == xlogreadsegno);
+
+	/*
+	 * On-disk WAL is encrypted (body only).  pg_rewind reads pages
+	 * directly via read(), bypassing WALRead.  Decrypt the page body
+	 * here so the XLogReader sees plaintext.  Header bytes (plaintext
+	 * on disk) are untouched by the range walker.
+	 */
+	WalPagelevelInsertDecryptRange(readBuf, XLOG_BLCKSZ,
+								   xlogreadsegno, targetPageOff, WalSegSz);
 
 	xlogreader->seg.ws_tli = targetHistory[private->tliIndex].tli;
 	return XLOG_BLCKSZ;
