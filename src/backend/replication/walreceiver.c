@@ -59,6 +59,7 @@
 #include "access/xlogrecovery.h"
 #include "access/xlogwait.h"
 #include "catalog/pg_authid.h"
+#include "common/wal_pagelevel_insert.h"
 #include "funcapi.h"
 #include "libpq/pqformat.h"
 #include "libpq/pqsignal.h"
@@ -917,6 +918,34 @@ XLogWalRcvWrite(char *buf, Size nbytes, XLogRecPtr recptr, TimeLineID tli)
 	instr_time	start;
 
 	Assert(tli != 0);
+
+	/*
+	 * The wire bytes are plaintext.  Body-encrypt them in place before
+	 * any pg_pwrite, walking per-segment so EncryptRange's IV math
+	 * stays correct.  We do this in a single pass up front so partial
+	 * writes in the pg_pwrite loop below do not risk double-encrypting
+	 * already-encrypted bytes on retry.
+	 */
+	{
+		char	   *p = buf;
+		Size		remaining = nbytes;
+		XLogRecPtr	cur = recptr;
+
+		while (remaining > 0)
+		{
+			XLogSegNo	segno;
+			uint32		offset_in_seg = XLogSegmentOffset(cur, wal_segment_size);
+			Size		in_seg;
+
+			XLByteToSeg(cur, segno, wal_segment_size);
+			in_seg = Min(remaining, wal_segment_size - offset_in_seg);
+			WalPagelevelInsertEncryptRange(p, p, in_seg, segno,
+										   offset_in_seg, wal_segment_size);
+			p += in_seg;
+			cur += in_seg;
+			remaining -= in_seg;
+		}
+	}
 
 	while (nbytes > 0)
 	{
