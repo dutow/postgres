@@ -76,6 +76,10 @@ WalPagelevelInsertEnsureCtx(void)
 void
 WalPagelevelInsertLogAtStartup(void)
 {
+#ifndef FRONTEND
+	ereport(LOG,
+			(errmsg("WAL page-level encryption (insert-time): AES-256-CTR, IV=page-start-LSN")));
+#endif
 }
 
 void
