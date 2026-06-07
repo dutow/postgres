@@ -69,6 +69,7 @@
 #include "catalog/pg_database.h"
 #include "common/controldata_utils.h"
 #include "common/file_utils.h"
+#include "common/wal_pagelevel_insert.h"
 #include "executor/instrument.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
@@ -2159,6 +2160,21 @@ AdvanceXLInsertBuffer(XLogRecPtr upto, TimeLineID tli, bool opportunistic)
 			NewLongPage->xlp_seg_size = wal_segment_size;
 			NewLongPage->xlp_xlog_blcksz = XLOG_BLCKSZ;
 			NewPage->xlp_info |= XLP_LONG_HEADER;
+		}
+
+		/*
+		 * Fill the body region with raw keystream so that untouched body
+		 * bytes decrypt back to plaintext zero — matching the upstream
+		 * "tail of page is zero" invariant after CopyXLogRecordToWAL has
+		 * encrypted the record-bearing prefix in place.
+		 */
+		{
+			uint32		header_size = (NewPage->xlp_info & XLP_LONG_HEADER)
+				? SizeOfXLogLongPHD : SizeOfXLogShortPHD;
+
+			WalPagelevelInsertKeystream((char *) NewPage + header_size,
+										NewPageBeginPtr, header_size,
+										XLOG_BLCKSZ - header_size);
 		}
 
 		/*
