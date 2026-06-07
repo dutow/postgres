@@ -31,6 +31,7 @@
 #include "access/xlogrecord.h"
 #include "catalog/pg_control.h"
 #include "common/pg_lzcompress.h"
+#include "common/wal_pagelevel_insert.h"
 #include "replication/origin.h"
 
 #ifndef FRONTEND
@@ -1611,6 +1612,14 @@ WALRead(XLogReaderState *state,
 			errinfo->wre_seg = state->seg;
 			return false;
 		}
+
+		/*
+		 * Decrypt the body of every page covered by [startoff,
+		 * startoff + readbytes).  Header bytes stay plaintext.
+		 */
+		WalPagelevelInsertDecryptRange(p, readbytes,
+									   state->seg.ws_segno, startoff,
+									   state->segcxt.ws_segsize);
 
 		/* Update state for read */
 		recptr += readbytes;
