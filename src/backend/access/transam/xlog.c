@@ -1885,6 +1885,33 @@ WALReadFromBuffers(char *dstbuf, XLogRecPtr startptr, Size count,
 		if (expectedEndPtr != endptr)
 			break;
 
+		/*
+		 * Page body is encrypted in shared memory under this prototype.
+		 * Decrypt the body portion of the just-copied slice in place.
+		 * Header bytes (plaintext both in memory and on disk) are left
+		 * alone.  Only run after the second verification step succeeds
+		 * so we never decrypt a torn copy.
+		 */
+		{
+			XLogRecPtr	page_lsn = recptr - offset;
+			uint32		header_size = (XLogSegmentOffset(page_lsn, wal_segment_size) == 0)
+				? SizeOfXLogLongPHD : SizeOfXLogShortPHD;
+
+			if (offset < header_size)
+			{
+				uint32		header_skip = Min((uint32) npagebytes,
+											  header_size - offset);
+
+				if ((Size) header_skip < npagebytes)
+					WalPagelevelInsertDecrypt(pdst + header_skip,
+											  npagebytes - header_skip,
+											  page_lsn, header_size);
+			}
+			else
+				WalPagelevelInsertDecrypt(pdst, npagebytes,
+										  page_lsn, offset);
+		}
+
 		pdst += npagebytes;
 		recptr += npagebytes;
 		nbytes -= npagebytes;
@@ -6499,6 +6526,43 @@ StartupXLOG(void)
 		page = &XLogCtl->pages[firstIdx * XLOG_BLCKSZ];
 		memcpy(page, endOfRecoveryInfo->lastPage, len);
 		memset(page + len, 0, XLOG_BLCKSZ - len);
+
+		/*
+		 * The recovered partial page is plaintext (decrypted by
+		 * XLogPageRead during recovery), but the in-memory invariant
+		 * for this prototype is that the page body is encrypted.
+		 * Re-encrypt the body portion of the valid prefix so that:
+		 *   (a) the shared buffer state matches the ciphertext already
+		 *       on disk for this page,
+		 *   (b) future XLogWrite calls that flush this page rewrite
+		 *       the same ciphertext bytes (no plaintext leak), and
+		 *   (c) future record inserts overwrite ciphertext with
+		 *       ciphertext (consistent with the keystream-of-zero tail
+		 *       that AdvanceXLInsertBuffer would otherwise produce).
+		 *
+		 * Header bytes [0, header_size) stay plaintext.  Tail bytes
+		 * [max(len, header_size), XLOG_BLCKSZ) are filled with raw
+		 * keystream so untouched tail decrypts back to zero.
+		 */
+		{
+			XLogRecPtr	page_lsn = endOfRecoveryInfo->lastPageBeginPtr;
+			uint32		header_size = (XLogSegmentOffset(page_lsn, wal_segment_size) == 0)
+				? SizeOfXLogLongPHD : SizeOfXLogShortPHD;
+
+			if (len > header_size)
+				WalPagelevelInsertEncrypt(page + header_size,
+										  page + header_size,
+										  len - header_size,
+										  page_lsn, header_size);
+			{
+				uint32		tail_off = Max(len, header_size);
+
+				if (tail_off < XLOG_BLCKSZ)
+					WalPagelevelInsertKeystream(page + tail_off, page_lsn,
+												tail_off,
+												XLOG_BLCKSZ - tail_off);
+			}
+		}
 
 		pg_atomic_write_u64(&XLogCtl->xlblocks[firstIdx], endOfRecoveryInfo->lastPageBeginPtr + XLOG_BLCKSZ);
 		XLogCtl->InitializedUpTo = endOfRecoveryInfo->lastPageBeginPtr + XLOG_BLCKSZ;
