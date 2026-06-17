@@ -19,6 +19,7 @@
 #include "common/ip.h"
 #include "funcapi.h"
 #include "libpq/hba.h"
+#include "libpq/toml_config.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -546,6 +547,9 @@ fill_hosts_line(Tuplestorestate *tuple_store, TupleDesc tupdesc,
 /*
  * fill_hosts_view
  *		Read the pg_hosts file and fill the tuplestore with view records.
+ *
+ * Dispatches on the file extension: a ".toml" file is parsed via
+ * parse_hosts_toml, anything else via the conf-format tokenizer.
  */
 static void
 fill_hosts_view(Tuplestorestate *tuple_store, TupleDesc tupdesc)
@@ -556,6 +560,45 @@ fill_hosts_view(Tuplestorestate *tuple_store, TupleDesc tupdesc)
 	int			rule_number = 0;
 	MemoryContext hostscxt;
 	MemoryContext oldcxt;
+
+	if (toml_path(HostsFileName))
+	{
+		bool		missing = false;
+		char	   *file_err = NULL;
+		List	   *entries;
+		ListCell   *lc;
+
+		hostscxt = AllocSetContextCreate(CurrentMemoryContext,
+										 "hosts parser context",
+										 ALLOCSET_SMALL_SIZES);
+		oldcxt = MemoryContextSwitchTo(hostscxt);
+
+		entries = parse_hosts_toml(HostsFileName, DEBUG3, &missing, &file_err);
+
+		if (!missing && file_err != NULL)
+		{
+			/* whole-file error: one row, no line number */
+			fill_hosts_line(tuple_store, tupdesc, 0, HostsFileName, 0, NULL, file_err);
+		}
+		else if (!missing)
+		{
+			foreach(lc, entries)
+			{
+				HostsLine  *hl = (HostsLine *) lfirst(lc);
+
+				if (hl->err_msg == NULL)
+					rule_number++;
+				fill_hosts_line(tuple_store, tupdesc, rule_number, HostsFileName,
+								hl->linenumber, hl->err_msg ? NULL : hl, hl->err_msg);
+			}
+		}
+
+		MemoryContextSwitchTo(oldcxt);
+		MemoryContextDelete(hostscxt);
+		return;
+	}
+
+	/* conf format */
 
 	file = open_auth_file(HostsFileName, DEBUG3, 0, NULL);
 	if (file == NULL)

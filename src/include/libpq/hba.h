@@ -163,6 +163,7 @@ typedef struct HostsLine
 
 	/* Internal bookkeeping */
 	void	   *ssl_ctx;		/* associated SSL_CTX* for the above settings */
+	char	   *err_msg;		/* parse error for this entry, NULL if valid */
 } HostsLine;
 
 /*
@@ -195,6 +196,17 @@ extern int	check_usermap(const char *usermap_name,
 						  bool case_insensitive);
 extern HbaLine *parse_hba_line(TokenizedAuthLine *tok_line, int elevel);
 extern HostsLine *parse_hosts_line(TokenizedAuthLine *tok_line, int elevel);
+
+/*
+ * Parse a pg_hosts TOML file into a list of HostsLine.
+ *   *missing  = true  -> file does not exist (ENOENT); returns NIL
+ *   *file_err != NULL -> whole-file open/parse error; returns NIL
+ *   otherwise         -> one HostsLine per [hosts.<name>] table; a failed
+ *                        entry has err_msg set.
+ */
+extern List *parse_hosts_toml(const char *filename, int elevel,
+							  bool *missing, char **file_err);
+
 extern IdentLine *parse_ident_line(TokenizedAuthLine *tok_line, int elevel);
 extern FILE *open_auth_file(const char *filename, int elevel, int depth,
 							char **err_msg);
