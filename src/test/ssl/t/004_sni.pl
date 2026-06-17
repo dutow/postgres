@@ -454,4 +454,22 @@ $result = $node->restart(fail_ok => 1);
 is($result, 0,
 	'pg_hosts.conf: restart fails with non-boolean value in boolean field');
 
+# pg_hosts_file_rules() reflects the parsed conf file.  Write a known-good
+# configuration so the SRF reports at least one valid entry.
+$node->append_conf('pg_hba.conf', "local all all trust");
+ok(unlink($node->data_dir . '/pg_hosts.conf'));
+$node->append_conf('pg_hosts.conf',
+	'example.org server-cn-only.crt server-cn-only.key root+client_ca.crt');
+$node->restart;
+my $rules = $node->safe_psql('postgres',
+	"SELECT count(*) FROM pg_hosts_file_rules() WHERE error IS NULL");
+ok($rules >= 1, "pg_hosts_file_rules: valid conf entries are reported");
+
+# A malformed entry shows up as an error row, not a thrown error.
+$node->append_conf('pg_hosts.conf', "this line has too many fields a b c d e f");
+$node->reload;
+my $errs = $node->safe_psql('postgres',
+	"SELECT count(*) FROM pg_hosts_file_rules() WHERE error IS NOT NULL");
+ok($errs >= 1, "pg_hosts_file_rules: malformed conf entry becomes an error row");
+
 done_testing();
