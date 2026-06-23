@@ -20,8 +20,13 @@
 #include "postgres.h"
 
 #include "access/htup_details.h"
+#include "access/nbtree.h"
+#include "access/stratnum.h"
 #include "access/table.h"
+#include "catalog/pg_am.h"
+#include "catalog/pg_amop.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_operator.h"
@@ -53,6 +58,7 @@
 #include "tcop/tcopprot.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
+#include "utils/catcache.h"
 #include "utils/datum.h"
 #include "utils/fmgroids.h"
 #include "utils/json.h"
@@ -6299,6 +6305,11 @@ pull_paramids_walker(Node *node, Bitmapset **context)
  * equal.
  *
  * Returns true if any such conflict exists.
+ *
+ * A grouping column wrapped in an expression is handled conservatively; see
+ * wrapped_operand_has_grouping_conflict().  Only OpExpr / ScalarArrayOpExpr /
+ * RowCompareExpr are inspected, so a grouping column consumed by some other
+ * boolean function is not caught.
  */
 bool
 expression_has_grouping_conflict(Node *expr,
@@ -6490,6 +6501,78 @@ grouping_conflict_walker(Node *node, grouping_walker_ctx *ctx)
 }
 
 /*
+ * grouping_eqop_is_image_faithful
+ *	  True if 'eqop' equates only byte-identical values (btree equalimage).
+ *	  Then no wrapper can split a group on that column.  When that cannot be
+ *	  proven, because there is no btree opclass, no equalimage proc, or it
+ *	  returns false (as for numeric, record or float), the eqop is reported as
+ *	  not faithful.  Probed under C_COLLATION_OID so collation coarseness stays
+ *	  the ancestor-collation check's job.
+ */
+static bool
+grouping_eqop_is_image_faithful(Oid eqop)
+{
+	CatCList   *catlist;
+	Oid			opfamily = InvalidOid;
+	Oid			opcintype = InvalidOid;
+	Oid			equalimageproc;
+	int			i;
+
+	catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(eqop));
+	for (i = 0; i < catlist->n_members; i++)
+	{
+		Form_pg_amop amop = (Form_pg_amop) GETSTRUCT(&catlist->members[i]->tuple);
+
+		if (amop->amopmethod == BTREE_AM_OID &&
+			amop->amopstrategy == BTEqualStrategyNumber)
+		{
+			opfamily = amop->amopfamily;
+			opcintype = amop->amoplefttype;
+			break;
+		}
+	}
+	ReleaseSysCacheList(catlist);
+
+	if (!OidIsValid(opfamily))
+		return false;
+
+	equalimageproc = get_opfamily_proc(opfamily, opcintype, opcintype,
+									   BTEQUALIMAGE_PROC);
+	if (!OidIsValid(equalimageproc))
+		return false;
+
+	return DatumGetBool(OidFunctionCall1Coll(equalimageproc, C_COLLATION_OID,
+											 ObjectIdGetDatum(opcintype)));
+}
+
+/*
+ * wrapped_operand_has_grouping_conflict
+ *	  True if 'node' (a wrapped comparison operand) contains a grouping column
+ *	  whose equality is not image-faithful.  The wrapper may expose a
+ *	  distinction the grouping hides (e.g. amt::text reveals numeric scale), so
+ *	  we keep the qual; image-faithful columns can't be split and stay pushable.
+ */
+static bool
+wrapped_operand_has_grouping_conflict(Node *node, grouping_walker_ctx *ctx)
+{
+	if (node == NULL)
+		return false;
+
+	if (IsA(node, Var))
+	{
+		Var		   *var = (Var *) node;
+		Oid			eqop = ctx->get_eqop(var, ctx->cb_context);
+
+		if (OidIsValid(eqop) && !grouping_eqop_is_image_faithful(eqop))
+			return true;
+		return false;
+	}
+
+	return expression_tree_walker(node, wrapped_operand_has_grouping_conflict,
+								  ctx);
+}
+
+/*
  * comparison_has_grouping_eqop_conflict
  *	  Per-comparison helper: ask the callback whether each Var operand of
  *	  (opno, args) is a grouping column, and if so verify that 'opno' is
@@ -6498,6 +6581,10 @@ grouping_conflict_walker(Node *node, grouping_walker_ctx *ctx)
  * Strips RelabelType wrappers so const-folded CollateExpr leaves don't hide
  * the underlying Var.  Operators not in any btree/hash opfamily are skipped
  * (see the header comment on op_is_safe_index_member).
+ *
+ * A wrapped operand (not a bare Var) goes to
+ * wrapped_operand_has_grouping_conflict(): a grouping column buried in an
+ * expression would otherwise escape the test above and be wrongly relocated.
  *
  * The check is symmetric: any cross-opfamily comparison is rejected.  In
  * principle a qual operator from an opfamily whose equality is coarser than
@@ -6525,8 +6612,15 @@ comparison_has_grouping_eqop_conflict(Oid opno, List *args,
 		if (arg && IsA(arg, RelabelType))
 			arg = (Node *) ((RelabelType *) arg)->arg;
 
-		if (arg == NULL || !IsA(arg, Var))
+		if (arg == NULL)
 			continue;
+
+		if (!IsA(arg, Var))
+		{
+			if (wrapped_operand_has_grouping_conflict(arg, ctx))
+				return true;
+			continue;
+		}
 
 		var = (Var *) arg;
 		grouping_eqop = ctx->get_eqop(var, ctx->cb_context);

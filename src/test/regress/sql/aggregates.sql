@@ -626,8 +626,33 @@ explain (costs off)
 select a, count(*) from t_having group by a having a = row(1.0)::t_rec;
 select a, count(*) from t_having group by a having a = row(1.0)::t_rec;
 
+-- a grouping column reached through a wrapper must also stay in HAVING:
+-- record_ops has no equalimage support, so a reconstructed record is unsafe
+-- even though the outer "=" matches the grouping eqop.
+explain (costs off)
+select a, count(*) from t_having group by a
+  having row((a).x)::t_rec = row(1.0)::t_rec;
+
 drop table t_having;
 drop type t_rec;
+
+-- numeric ignores scale, so a cast to text can split a group: must stay in
+-- HAVING.  A wrapper over an image-faithful column (text) is safe and pushes.
+create temp table t_wrap (n numeric, s text);
+insert into t_wrap values (1.0, 'aa'), (1.00, 'aa'), (2, 'b');
+explain (costs off)
+select n, count(*) from t_wrap group by n having n::text = '1.0';
+explain (costs off)
+select s, count(*) from t_wrap group by s having length(s) = 2;
+drop table t_wrap;
+
+-- xid groups by hash and has no btree opclass, so a wrapped xid column falls
+-- to the conservative side and stays in HAVING.
+create temp table t_xid (x xid);
+insert into t_xid values ('1'), ('1'), ('2');
+explain (costs off)
+select x, count(*) from t_xid group by x having x::text = '1';
+drop table t_xid;
 
 --
 -- Test GROUP BY ALL
