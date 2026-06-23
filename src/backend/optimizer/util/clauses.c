@@ -6579,8 +6579,16 @@ wrapped_operand_has_grouping_conflict(Node *node, grouping_walker_ctx *ctx)
  *	  equality-compatible with the callback-reported grouping eqop.
  *
  * Strips RelabelType wrappers so const-folded CollateExpr leaves don't hide
- * the underlying Var.  Operators not in any btree/hash opfamily are skipped
- * (see the header comment on op_is_safe_index_member).
+ * the underlying Var.  Only boolean operators can split a group, so others are
+ * ignored.  A direct grouping Var operand conflicts only when its equality is
+ * not image-faithful, so that a finer operator could tell merged rows apart,
+ * and 'opno' is not opfamily-compatible with it.  equality_ops_are_compatible()
+ * rejects any operator not sharing a btree/hash opfamily with the grouping
+ * eqop, including one in no opfamily at all, so an operator we cannot prove
+ * compatible is a conflict.  For an image-faithful column such as an integer,
+ * deterministic text or inet, merged rows are byte-identical, so no operator,
+ * whether LIKE, network containment, or anything else, can split a group and
+ * the qual stays pushable.
  *
  * A wrapped operand (not a bare Var) goes to
  * wrapped_operand_has_grouping_conflict(): a grouping column buried in an
@@ -6600,7 +6608,7 @@ comparison_has_grouping_eqop_conflict(Oid opno, List *args,
 {
 	ListCell   *lc;
 
-	if (!OidIsValid(opno) || !op_is_safe_index_member(opno))
+	if (!OidIsValid(opno) || get_op_rettype(opno) != BOOLOID)
 		return false;
 
 	foreach(lc, args)
@@ -6627,7 +6635,8 @@ comparison_has_grouping_eqop_conflict(Oid opno, List *args,
 		if (!OidIsValid(grouping_eqop))
 			continue;
 
-		if (!equality_ops_are_compatible(opno, grouping_eqop))
+		if (!grouping_eqop_is_image_faithful(grouping_eqop) &&
+			!equality_ops_are_compatible(opno, grouping_eqop))
 			return true;
 	}
 

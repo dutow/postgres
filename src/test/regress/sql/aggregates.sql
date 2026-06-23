@@ -654,6 +654,30 @@ explain (costs off)
 select x, count(*) from t_xid group by x having x::text = '1';
 drop table t_xid;
 
+-- A non-opfamily operator on an image-faithful grouping column cannot split a
+-- group (merged rows are byte-identical), so LIKE / regex / network
+-- containment stay pushable.
+create temp table t_like (s text, ip inet);
+insert into t_like values ('apple', '10.0.0.1'), ('apple', '10.0.0.1'), ('pear', '192.168.0.1');
+explain (costs off)
+select s, count(*) from t_like group by s having s like 'a%';
+explain (costs off)
+select ip, count(*) from t_like group by ip having ip << '10.0.0.0/8';
+drop table t_like;
+
+-- A non-opfamily operator finer than the grouping eqop on a non-image-faithful
+-- column must stay in HAVING.  (Use plpgsql so the operator is not inlined.)
+create function num_image_eq(numeric, numeric) returns bool
+  language plpgsql immutable as $$ begin return $1::text = $2::text; end $$;
+create operator === (leftarg = numeric, rightarg = numeric, function = num_image_eq);
+create temp table t_op (n numeric);
+insert into t_op values (1.0), (1.00), (2);
+explain (costs off)
+select n, count(*) from t_op group by n having n === 1.0;
+drop table t_op;
+drop operator === (numeric, numeric);
+drop function num_image_eq(numeric, numeric);
+
 --
 -- Test GROUP BY ALL
 --
