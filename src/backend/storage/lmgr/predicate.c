@@ -200,6 +200,7 @@
 #include "access/twophase_rmgr.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#include "lib/stringinfo.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "port/pg_lfind.h"
@@ -498,6 +499,9 @@ static void CheckTargetForConflictsIn(PREDICATELOCKTARGETTAG *targettag);
 static void FlagRWConflict(SERIALIZABLEXACT *reader, SERIALIZABLEXACT *writer);
 static void OnConflict_CheckForSerializationFailure(const SERIALIZABLEXACT *reader,
 													SERIALIZABLEXACT *writer);
+pg_noreturn static void RaiseSerializationFailureVA(const char *fmt, va_list args) pg_attribute_printf(1, 0);
+pg_noreturn static void RaiseSerializationFailure(const char *fmt, ...) pg_attribute_printf(1, 2);
+pg_noreturn static void DoomMyselfAndRaiseSerializationFailure(const char *fmt, ...) pg_attribute_printf(1, 2);
 static void CreateLocalPredicateLockHash(void);
 static void ReleasePredicateLocksLocal(void);
 
@@ -3916,6 +3920,79 @@ XidIsConcurrent(TransactionId xid)
 	return pg_lfind32(xid, snap->xip, snap->xcnt);
 }
 
+/*
+ * Raise a serialization failure error.
+ *
+ * The message is the same for all such failures; the caller passes the
+ * "Reason code" detail identifying which check failed.
+ */
+static void
+RaiseSerializationFailureVA(const char *fmt, va_list args)
+{
+	StringInfoData detail;
+
+	initStringInfo(&detail);
+
+	for (;;)
+	{
+		va_list		cargs;
+		int			needed;
+
+		va_copy(cargs, args);
+		needed = appendStringInfoVA(&detail, fmt, cargs);
+		va_end(cargs);
+		if (needed == 0)
+			break;
+		enlargeStringInfo(&detail, needed);
+	}
+
+	ereport(ERROR,
+			(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+			 errmsg("could not serialize access due to read/write dependencies among transactions"),
+			 errdetail_internal("%s", detail.data),
+			 errhint("The transaction might succeed if retried.")));
+}
+
+static void
+RaiseSerializationFailure(const char *fmt, ...)
+{
+	va_list		args;
+
+	va_start(args, fmt);
+	RaiseSerializationFailureVA(fmt, args);
+}
+
+/*
+ * Doom the current serializable transaction and raise a serialization
+ * failure error.
+ *
+ * The error we raise may be caught by a subtransaction abort (ROLLBACK TO
+ * SAVEPOINT, or a PL/pgSQL exception block), after which the top level
+ * transaction could continue and even commit.  That must not rescue it:
+ * rolling back a subtransaction does not undo the reads it performed, or
+ * un-observe the dangerous structure we detected (see the discussion of
+ * subtransactions in README-SSI).  Set SXACT_FLAG_DOOMED before raising
+ * the error, so that PreCommit_CheckForSerializationFailure() cancels the
+ * transaction at commit even if the error is swallowed.
+ *
+ * The caller must hold SerializableXactHashLock exclusive; we release it
+ * before raising the error.  Any va_arg the caller passes is evaluated at
+ * the call site, so it may safely reference data protected by that lock.
+ */
+static void
+DoomMyselfAndRaiseSerializationFailure(const char *fmt, ...)
+{
+	va_list		args;
+
+	Assert(LWLockHeldByMeInMode(SerializableXactHashLock, LW_EXCLUSIVE));
+
+	MySerializableXact->flags |= SXACT_FLAG_DOOMED;
+	LWLockRelease(SerializableXactHashLock);
+
+	va_start(args, fmt);
+	RaiseSerializationFailureVA(fmt, args);
+}
+
 bool
 CheckForSerializableConflictOutNeeded(Relation relation, Snapshot snapshot)
 {
@@ -3924,13 +4001,7 @@ CheckForSerializableConflictOutNeeded(Relation relation, Snapshot snapshot)
 
 	/* Check if someone else has already decided that we need to die */
 	if (SxactIsDoomed(MySerializableXact))
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-				 errmsg("could not serialize access due to read/write dependencies among transactions"),
-				 errdetail_internal("Reason code: Canceled on identification as a pivot, during conflict out checking."),
-				 errhint("The transaction might succeed if retried.")));
-	}
+		RaiseSerializationFailure("Reason code: Canceled on identification as a pivot, during conflict out checking.");
 
 	return true;
 }
@@ -3960,13 +4031,7 @@ CheckForSerializableConflictOut(Relation relation, TransactionId xid, Snapshot s
 
 	/* Check if someone else has already decided that we need to die */
 	if (SxactIsDoomed(MySerializableXact))
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-				 errmsg("could not serialize access due to read/write dependencies among transactions"),
-				 errdetail_internal("Reason code: Canceled on identification as a pivot, during conflict out checking."),
-				 errhint("The transaction might succeed if retried.")));
-	}
+		RaiseSerializationFailure("Reason code: Canceled on identification as a pivot, during conflict out checking.");
 	Assert(TransactionIdIsValid(xid));
 
 	if (TransactionIdEquals(xid, GetTopTransactionIdIfAny()))
@@ -3994,19 +4059,11 @@ CheckForSerializableConflictOut(Relation relation, TransactionId xid, Snapshot s
 				&& (!SxactIsReadOnly(MySerializableXact)
 					|| conflictCommitSeqNo
 					<= MySerializableXact->SeqNo.lastCommitBeforeSnapshot))
-				ereport(ERROR,
-						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-						 errmsg("could not serialize access due to read/write dependencies among transactions"),
-						 errdetail_internal("Reason code: Canceled on conflict out to old pivot %u.", xid),
-						 errhint("The transaction might succeed if retried.")));
+				DoomMyselfAndRaiseSerializationFailure("Reason code: Canceled on conflict out to old pivot %u.", xid);
 
 			if (SxactHasSummaryConflictIn(MySerializableXact)
 				|| !dlist_is_empty(&MySerializableXact->inConflicts))
-				ereport(ERROR,
-						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-						 errmsg("could not serialize access due to read/write dependencies among transactions"),
-						 errdetail_internal("Reason code: Canceled on identification as a pivot, with conflict out to old committed transaction %u.", xid),
-						 errhint("The transaction might succeed if retried.")));
+				DoomMyselfAndRaiseSerializationFailure("Reason code: Canceled on identification as a pivot, with conflict out to old committed transaction %u.", xid);
 
 			MySerializableXact->flags |= SXACT_FLAG_SUMMARY_CONFLICT_OUT;
 		}
@@ -4039,14 +4096,7 @@ CheckForSerializableConflictOut(Relation relation, TransactionId xid, Snapshot s
 			return;
 		}
 		else
-		{
-			LWLockRelease(SerializableXactHashLock);
-			ereport(ERROR,
-					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-					 errmsg("could not serialize access due to read/write dependencies among transactions"),
-					 errdetail_internal("Reason code: Canceled on conflict out to old pivot."),
-					 errhint("The transaction might succeed if retried.")));
-		}
+			DoomMyselfAndRaiseSerializationFailure("Reason code: Canceled on conflict out to old pivot.");
 	}
 
 	/*
@@ -4271,11 +4321,7 @@ CheckForSerializableConflictIn(Relation relation, const ItemPointerData *tid, Bl
 
 	/* Check if someone else has already decided that we need to die */
 	if (SxactIsDoomed(MySerializableXact))
-		ereport(ERROR,
-				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-				 errmsg("could not serialize access due to read/write dependencies among transactions"),
-				 errdetail_internal("Reason code: Canceled on identification as a pivot, during conflict in checking."),
-				 errhint("The transaction might succeed if retried.")));
+		RaiseSerializationFailure("Reason code: Canceled on identification as a pivot, during conflict in checking.");
 
 	/*
 	 * We're doing a write which might cause rw-conflicts now or later.
@@ -4588,25 +4634,12 @@ OnConflict_CheckForSerializationFailure(const SERIALIZABLEXACT *reader,
 		 * anymore, so we have to kill the reader instead.
 		 */
 		if (MySerializableXact == writer)
-		{
-			LWLockRelease(SerializableXactHashLock);
-			ereport(ERROR,
-					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-					 errmsg("could not serialize access due to read/write dependencies among transactions"),
-					 errdetail_internal("Reason code: Canceled on identification as a pivot, during write."),
-					 errhint("The transaction might succeed if retried.")));
-		}
+			DoomMyselfAndRaiseSerializationFailure("Reason code: Canceled on identification as a pivot, during write.");
 		else if (SxactIsPrepared(writer))
 		{
-			LWLockRelease(SerializableXactHashLock);
-
 			/* if we're not the writer, we have to be the reader */
 			Assert(MySerializableXact == reader);
-			ereport(ERROR,
-					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-					 errmsg("could not serialize access due to read/write dependencies among transactions"),
-					 errdetail_internal("Reason code: Canceled on conflict out to pivot %u, during read.", writer->topXid),
-					 errhint("The transaction might succeed if retried.")));
+			DoomMyselfAndRaiseSerializationFailure("Reason code: Canceled on conflict out to pivot %u, during read.", writer->topXid);
 		}
 		writer->flags |= SXACT_FLAG_DOOMED;
 	}
@@ -4649,11 +4682,7 @@ PreCommit_CheckForSerializationFailure(void)
 		!SxactIsPartiallyReleased(MySerializableXact))
 	{
 		LWLockRelease(SerializableXactHashLock);
-		ereport(ERROR,
-				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-				 errmsg("could not serialize access due to read/write dependencies among transactions"),
-				 errdetail_internal("Reason code: Canceled on identification as a pivot, during commit attempt."),
-				 errhint("The transaction might succeed if retried.")));
+		RaiseSerializationFailure("Reason code: Canceled on identification as a pivot, during commit attempt.");
 	}
 
 	dlist_foreach(near_iter, &MySerializableXact->inConflicts)
@@ -4683,14 +4712,7 @@ PreCommit_CheckForSerializationFailure(void)
 					 * in that case we commit suicide instead.
 					 */
 					if (SxactIsPrepared(nearConflict->sxactOut))
-					{
-						LWLockRelease(SerializableXactHashLock);
-						ereport(ERROR,
-								(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-								 errmsg("could not serialize access due to read/write dependencies among transactions"),
-								 errdetail_internal("Reason code: Canceled on commit attempt with conflict in from prepared pivot."),
-								 errhint("The transaction might succeed if retried.")));
-					}
+						DoomMyselfAndRaiseSerializationFailure("Reason code: Canceled on commit attempt with conflict in from prepared pivot.");
 					nearConflict->sxactOut->flags |= SXACT_FLAG_DOOMED;
 					break;
 				}
