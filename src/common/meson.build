@@ -74,6 +74,15 @@ ryu_cflags = []
 
 ryu_cflags += cflags_no_decl_after_statement
 
+# The vendored tomlc17 TOML parser also gets a pass on
+# declaration-after-statement, for the same reason as Ryu.
+tomlc17_sources = files(
+  'tomlc17.c',
+)
+tomlc17_cflags = []
+
+tomlc17_cflags += cflags_no_decl_after_statement
+
 config_info_sources = files('config_info.c',)
 config_info_cflags = [
   '-DVAL_CC="@0@"'.format(var_cc),
@@ -90,10 +99,12 @@ config_info_cflags = [
 # defined here.
 common_cflags = {
   'ryu': ryu_cflags,
+  'tomlc17': tomlc17_cflags,
   'config_info': config_info_cflags,
 }
 common_sources_cflags = {
   'ryu': ryu_sources,
+  'tomlc17': tomlc17_sources,
   'config_info': config_info_sources
 }
 

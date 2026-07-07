@@ -79,6 +79,7 @@ OBJS_COMMON = \
 	scram-common.o \
 	string.o \
 	stringinfo.o \
+	tomlc17.o \
 	unicode_case.o \
 	unicode_category.o \
 	unicode_norm.o \
@@ -210,6 +211,13 @@ RYU_FILES = d2s.o f2s.o
 RYU_OBJS = $(RYU_FILES) $(RYU_FILES:%.o=%_shlib.o) $(RYU_FILES:%.o=%_srv.o)
 
 $(RYU_OBJS): CFLAGS += $(PERMIT_DECLARATION_AFTER_STATEMENT)
+
+# The vendored tomlc17 TOML parser also gets a pass on
+# declaration-after-statement, for the same reason as Ryu.
+TOMLC17_FILES = tomlc17.o
+TOMLC17_OBJS = $(TOMLC17_FILES) $(TOMLC17_FILES:%.o=%_shlib.o) $(TOMLC17_FILES:%.o=%_srv.o)
+
+$(TOMLC17_OBJS): CFLAGS += $(PERMIT_DECLARATION_AFTER_STATEMENT)
 
 clean distclean:
 	rm -f libpgcommon.a libpgcommon_shlib.a libpgcommon_srv.a libpgcommon_excluded_shlib.a
