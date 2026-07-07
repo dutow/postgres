@@ -28,7 +28,8 @@ OBJS = \
 	pqcomm.o \
 	pqformat.o \
 	pqmq.o \
-	pqsignal.o
+	pqsignal.o \
+	toml_config.o
 
 ifeq ($(with_ssl),openssl)
 OBJS += be-secure-openssl.o

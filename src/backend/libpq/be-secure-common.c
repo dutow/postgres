@@ -24,7 +24,9 @@
 
 #include "common/percentrepl.h"
 #include "common/string.h"
+#include "common/tomlc17.h"
 #include "libpq/libpq.h"
+#include "libpq/toml_config.h"
 #include "storage/fd.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -351,6 +353,199 @@ parse_hosts_line(TokenizedAuthLine *tok_line, int elevel)
 	return parsedline;
 }
 
+static const char *const hosts_toml_keys[] = {
+	"ssl_certificate",
+	"ssl_key",
+	"ssl_ca",
+	"passphrase_command",
+	"passphrase_command_reload",
+	NULL,
+};
+
+/*
+ * Validate one TOML table (a host entry or the _defaults table) and copy its
+ * values into *out (a HostsLine); string values are pstrdup'd so they survive
+ * freeing the parsed TOML document. "label" is the dotted path for
+ * diagnostics, e.g. "hosts._defaults".
+ *
+ * *reload_present is set true if passphrase_command_reload was specified, so
+ * the merge can tell "omitted" from "set to false".
+ */
+static bool
+hosts_toml_collect(toml_datum_t tab, const char *label, const char *filename,
+				   int elevel, HostsLine *out, bool *reload_present)
+{
+	toml_datum_t cert = toml_get(tab, "ssl_certificate");
+	toml_datum_t key = toml_get(tab, "ssl_key");
+	toml_datum_t ca = toml_get(tab, "ssl_ca");
+	toml_datum_t cmd = toml_get(tab, "passphrase_command");
+	toml_datum_t rel = toml_get(tab, "passphrase_command_reload");
+
+	*reload_present = false;
+
+	if (!toml_reject_unknown(hosts_toml_keys, tab, label, filename, elevel))
+		return false;
+
+	if (cert.type != TOML_UNKNOWN && cert.type != TOML_STRING)
+		return toml_type_error(label, "ssl_certificate", "string", filename, elevel);
+	if (key.type != TOML_UNKNOWN && key.type != TOML_STRING)
+		return toml_type_error(label, "ssl_key", "string", filename, elevel);
+	if (ca.type != TOML_UNKNOWN && ca.type != TOML_STRING)
+		return toml_type_error(label, "ssl_ca", "string", filename, elevel);
+	if (cmd.type != TOML_UNKNOWN && cmd.type != TOML_STRING)
+		return toml_type_error(label, "passphrase_command", "string", filename, elevel);
+	if (rel.type != TOML_UNKNOWN && rel.type != TOML_BOOLEAN)
+		return toml_type_error(label, "passphrase_command_reload", "boolean", filename, elevel);
+
+	if (cert.type == TOML_STRING)
+		out->ssl_cert = pstrdup(cert.u.s);
+	if (key.type == TOML_STRING)
+		out->ssl_key = pstrdup(key.u.s);
+	if (ca.type == TOML_STRING)
+		out->ssl_ca = pstrdup(ca.u.s);
+	if (cmd.type == TOML_STRING)
+		out->ssl_passphrase_cmd = pstrdup(cmd.u.s);
+	if (rel.type == TOML_BOOLEAN)
+	{
+		out->ssl_passphrase_reload = rel.u.boolean;
+		*reload_present = true;
+	}
+
+	return true;
+}
+
+/*
+ * Parse a pg_hosts TOML file into a list of HostsLine.
+ *   *missing    = true  -> file does not exist (ENOENT); returns NIL
+ *   *file_err  != NULL  -> whole-file open/parse error; returns NIL
+ *   *had_errors = true  -> some entries were invalid; they were reported at
+ *                          elevel and left out of the result
+ */
+static List *
+parse_hosts_toml(const char *filename, int elevel,
+				 bool *missing, bool *had_errors, char **file_err)
+{
+	toml_result_t result;
+	toml_datum_t hosts_section;
+	toml_datum_t defaults_dat;
+	HostsLine	defaults = {0};
+	bool		defaults_reload_present = false;
+	bool		have_defaults = false;
+	List	   *entries = NIL;
+
+	*missing = false;
+	*had_errors = false;
+	*file_err = NULL;
+
+	if (!toml_config_load(filename, elevel, &result, file_err))
+	{
+		if (*file_err == NULL)
+			*missing = true;	/* ENOENT */
+		return NIL;
+	}
+
+	hosts_section = toml_get(result.toptab, "hosts");
+	if (hosts_section.type == TOML_UNKNOWN)
+	{
+		toml_free(result);
+		return NIL;				/* no [hosts] table: empty */
+	}
+	if (hosts_section.type != TOML_TABLE)
+	{
+		*file_err = psprintf("\"hosts\" in \"%s\" is not a table", filename);
+		ereport(elevel,
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+				 errmsg("\"hosts\" in \"%s\" is not a table", filename)));
+		toml_free(result);
+		return NIL;
+	}
+
+	defaults_dat = toml_get(hosts_section, "_defaults");
+	if (defaults_dat.type == TOML_TABLE)
+	{
+		if (hosts_toml_collect(defaults_dat, "hosts._defaults", filename,
+							   elevel, &defaults, &defaults_reload_present))
+			have_defaults = true;
+		else
+			*had_errors = true;
+	}
+	else if (defaults_dat.type != TOML_UNKNOWN)
+	{
+		ereport(elevel,
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+				 errmsg("\"hosts._defaults\" in \"%s\" must be a table", filename)));
+		*had_errors = true;
+	}
+
+	for (int i = 0; i < hosts_section.u.tab.size; i++)
+	{
+		const char *name = hosts_section.u.tab.key[i];
+		toml_datum_t val = hosts_section.u.tab.value[i];
+		HostsLine  *hl;
+		bool		reload_present = false;
+
+		if (strcmp(name, "_defaults") == 0)
+			continue;
+
+		if (val.type != TOML_TABLE)
+		{
+			ereport(elevel,
+					(errcode(ERRCODE_CONFIG_FILE_ERROR),
+					 errmsg("\"hosts.%s\" in \"%s\" must be a table", name, filename)));
+			*had_errors = true;
+			continue;
+		}
+
+		hl = palloc0_object(HostsLine);
+		hl->linenumber = val.lineno;
+		hl->sourcefile = pstrdup(filename);
+		hl->rawline = pstrdup("");
+		hl->hostnames = list_make1(pstrdup(name));
+
+		{
+			char	   *label = psprintf("hosts.%s", name);
+			bool		ok = hosts_toml_collect(val, label, filename, elevel,
+												hl, &reload_present);
+
+			pfree(label);
+			if (!ok)
+			{
+				*had_errors = true;
+				continue;
+			}
+		}
+
+		if (have_defaults)
+		{
+			if (hl->ssl_cert == NULL)
+				hl->ssl_cert = defaults.ssl_cert;
+			if (hl->ssl_key == NULL)
+				hl->ssl_key = defaults.ssl_key;
+			if (hl->ssl_ca == NULL)
+				hl->ssl_ca = defaults.ssl_ca;
+			if (hl->ssl_passphrase_cmd == NULL)
+				hl->ssl_passphrase_cmd = defaults.ssl_passphrase_cmd;
+			if (!reload_present && defaults_reload_present)
+				hl->ssl_passphrase_reload = defaults.ssl_passphrase_reload;
+		}
+
+		if (hl->ssl_cert == NULL || hl->ssl_key == NULL)
+		{
+			ereport(elevel,
+					(errcode(ERRCODE_CONFIG_FILE_ERROR),
+					 errmsg("\"hosts.%s\" in \"%s\" is missing required \"ssl_certificate\" or \"ssl_key\"",
+							name, filename)));
+			*had_errors = true;
+			continue;
+		}
+
+		entries = lappend(entries, hl);
+	}
+
+	toml_free(result);
+	return entries;
+}
+
 /*
  * load_hosts
  *
@@ -383,6 +578,38 @@ load_hosts(List **hosts, char **err_msg)
 		return HOSTSFILE_LOAD_FAILED;
 	}
 	*hosts = NIL;
+
+	if (toml_path(HostsFileName))
+	{
+		bool		missing = false;
+		bool		had_errors = false;
+		char	   *file_err = NULL;
+		List	   *entries;
+
+		entries = parse_hosts_toml(HostsFileName, LOG, &missing, &had_errors,
+								   &file_err);
+		if (missing)
+			return HOSTSFILE_MISSING;
+		if (file_err)
+		{
+			if (err_msg)
+				*err_msg = file_err;
+			return HOSTSFILE_LOAD_FAILED;
+		}
+
+		*hosts = entries;
+
+		if (had_errors)
+		{
+			if (err_msg)
+				*err_msg = psprintf("loading config from \"%s\" failed due to parsing error",
+									HostsFileName);
+			return HOSTSFILE_LOAD_FAILED;
+		}
+		if (entries == NIL)
+			return HOSTSFILE_EMPTY;
+		return HOSTSFILE_LOAD_OK;
+	}
 
 	/*
 	 * This is not an auth file per se, but it is using the same file format
