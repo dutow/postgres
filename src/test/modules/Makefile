@@ -54,6 +54,7 @@ SUBDIRS = \
 		  test_slru \
 		  test_tidstore \
 		  unsafe_tests \
+		  wal_ctr_check \
 		  worker_spi \
 		  xid_wraparound
 

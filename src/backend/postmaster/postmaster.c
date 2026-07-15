@@ -94,6 +94,7 @@
 #include "access/xlogrecovery.h"
 #include "common/file_perm.h"
 #include "common/pg_prng.h"
+#include "common/wal_ctr.h"
 #include "lib/ilist.h"
 #include "libpq/libpq.h"
 #include "libpq/pqsignal.h"
@@ -1116,6 +1117,7 @@ PostmasterMain(int argc, char *argv[])
 	 */
 	ereport(LOG,
 			(errmsg("starting %s", PG_VERSION_STR)));
+	WalCtrLogVariantAtStartup();
 
 	/*
 	 * Establish input sockets.

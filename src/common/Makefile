@@ -84,6 +84,8 @@ OBJS_COMMON = \
 	unicode_norm.o \
 	username.o \
 	wait_error.o \
+	wal_ctr.o \
+	wal_ctr_key.o \
 	wchar.o
 
 ifeq ($(with_ssl),openssl)

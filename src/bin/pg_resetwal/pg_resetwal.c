@@ -54,6 +54,7 @@
 #include "common/logging.h"
 #include "common/restricted_token.h"
 #include "common/string.h"
+#include "common/wal_ctr.h"
 #include "fe_utils/option_utils.h"
 #include "fe_utils/version.h"
 #include "getopt_long.h"
@@ -1163,6 +1164,30 @@ WriteEmptyXLOG(void)
 	*(recptr++) = sizeof(CheckPoint);
 	memcpy(recptr, &ControlFile.checkPointCopy,
 		   sizeof(CheckPoint));
+
+	/*
+	 * The synthetic shutdown-checkpoint record bypasses XLogInsert and so
+	 * does not hit XLogEncryptRecordBody.  Encrypt it here so the decrypt
+	 * path in xlogreader.c can verify it like any other WAL record.
+	 *
+	 * Body-less records (e.g. XLOG_SWITCH) skip encryption, mirroring the
+	 * logic in XLogEncryptRecordBody.  The synthetic checkpoint always has a
+	 * body (the CheckPoint struct), so the branch is defensive.
+	 */
+	{
+		char	   *body = ((char *) record) + SizeOfXLogRecord;
+		Size		body_len = record->xl_tot_len - SizeOfXLogRecord;
+		char	   *iv = body + body_len;	/* appended in-place */
+
+		if (body_len > 0)
+		{
+			WalCtrInit();
+			WalCtrEncryptRecord(body, body, body_len, iv);
+			record->xl_tot_len += (uint32) WAL_CTR_OVERHEAD;
+			Assert(record->xl_tot_len <= XLogRecordMaxSize);
+			record->xl_info |= XLR_ENCRYPTED;
+		}
+	}
 
 	INIT_CRC32C(crc);
 	COMP_CRC32C(crc, ((char *) record) + SizeOfXLogRecord, record->xl_tot_len - SizeOfXLogRecord);

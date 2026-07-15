@@ -69,6 +69,7 @@
 #include "catalog/pg_database.h"
 #include "common/controldata_utils.h"
 #include "common/file_utils.h"
+#include "common/wal_ctr.h"
 #include "executor/instrument.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
@@ -5547,6 +5548,27 @@ BootStrapXLOG(uint32 data_checksum_version)
 	memcpy(recptr, &checkPoint, sizeof(checkPoint));
 	recptr += sizeof(checkPoint);
 	Assert(recptr - (char *) record == record->xl_tot_len);
+
+	/*
+	 * The bootstrap checkpoint record bypasses XLogInsert and so does not
+	 * hit XLogEncryptRecordBody.  Encrypt it here so the decrypt path in
+	 * xlogreader.c can verify it like any other WAL record.
+	 */
+	{
+		char	   *body = ((char *) record) + SizeOfXLogRecord;
+		Size		body_len = record->xl_tot_len - SizeOfXLogRecord;
+		char	   *iv = body + body_len;	/* appended in-place */
+
+		if (body_len > 0)
+		{
+			WalCtrInit();
+			WalCtrEncryptRecord(body, body, body_len, iv);
+
+			record->xl_tot_len += (uint32) WAL_CTR_OVERHEAD;
+			Assert(record->xl_tot_len <= XLogRecordMaxSize);
+			record->xl_info |= XLR_ENCRYPTED;
+		}
+	}
 
 	INIT_CRC32C(crc);
 	COMP_CRC32C(crc, ((char *) record) + SizeOfXLogRecord, record->xl_tot_len - SizeOfXLogRecord);

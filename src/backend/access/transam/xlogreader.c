@@ -31,6 +31,7 @@
 #include "access/xlogrecord.h"
 #include "catalog/pg_control.h"
 #include "common/pg_lzcompress.h"
+#include "common/wal_ctr.h"
 #include "replication/origin.h"
 
 #ifndef FRONTEND
@@ -880,6 +881,80 @@ restart:
 		/* Pretend it extends to end of segment */
 		state->NextRecPtr += state->segcxt.ws_segsize - 1;
 		state->NextRecPtr -= XLogSegmentOffset(state->NextRecPtr, state->segcxt.ws_segsize);
+	}
+
+	/*
+	 * Per-record WAL AES-256-CTR decrypt prototype.  CRC was computed over
+	 * the on-disk ciphertext above, so it has already passed.  Decrypt
+	 * shrinks the record by WAL_CTR_OVERHEAD bytes (the trailing IV) and
+	 * clears XLR_ENCRYPTED so DecodeXLogRecord and downstream consumers see
+	 * a normal record.
+	 *
+	 * Body layout on disk:
+	 *   body[0 .. plain_len)                    ciphertext
+	 *   body[plain_len .. plain_len+16)         IV (16 bytes)
+	 *
+	 * state->NextRecPtr was computed above from the on-disk ciphertext
+	 * total_len, so chaining is unaffected by the in-place shrink.
+	 *
+	 * Body-less records (e.g. XLOG_SWITCH) are not encrypted on the insert
+	 * side, so they reach us without XLR_ENCRYPTED.  Any other record
+	 * missing the flag indicates corruption.
+	 */
+	if ((record->xl_info & XLR_ENCRYPTED) == 0)
+	{
+		if (record->xl_tot_len != SizeOfXLogRecord)
+		{
+			report_invalid_record(state,
+								  "WAL record at %X/%08X missing XLR_ENCRYPTED flag in encrypted build",
+								  LSN_FORMAT_ARGS(RecPtr));
+			goto err;
+		}
+	}
+	else
+	{
+		size_t		body_len = record->xl_tot_len - SizeOfXLogRecord;
+		size_t		plain_len;
+		char	   *body;
+		const char *iv;
+
+		if (body_len < WAL_CTR_OVERHEAD)
+		{
+			report_invalid_record(state,
+								  "WAL record at %X/%08X body too short for CTR overhead (%zu < %u)",
+								  LSN_FORMAT_ARGS(RecPtr),
+								  body_len, (unsigned) WAL_CTR_OVERHEAD);
+			goto err;
+		}
+
+		plain_len = body_len - WAL_CTR_OVERHEAD;
+
+		/*
+		 * Single-page records point into state->readBuf, a page-sized cache
+		 * that ReadPageInternal reuses for subsequent reads of the same LSN
+		 * (e.g. recovery re-reads the checkpoint record while computing the
+		 * end of WAL).  Decrypting in place there would leave plaintext in
+		 * the cache; the second read would then fail ValidXLogRecord's CRC
+		 * check (CRC was computed over on-disk ciphertext).  Stage the
+		 * record into state->readRecordBuf (a per-record private buffer
+		 * rebuilt on every read) and decrypt there.  Multi-page records
+		 * already live in readRecordBuf.
+		 */
+		if (!assembled)
+		{
+			if (state->readRecordBufSize < record->xl_tot_len)
+				allocate_recordbuf(state, record->xl_tot_len);
+			memcpy(state->readRecordBuf, record, record->xl_tot_len);
+			record = (XLogRecord *) state->readRecordBuf;
+		}
+
+		body = ((char *) record) + SizeOfXLogRecord;
+		iv = body + plain_len;
+
+		WalCtrDecryptRecord(body, plain_len, iv);
+
+		record->xl_tot_len = (uint32) (SizeOfXLogRecord + plain_len);
+		record->xl_info &= ~XLR_ENCRYPTED;
 	}
 
 	/*

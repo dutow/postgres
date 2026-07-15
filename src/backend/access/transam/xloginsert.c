@@ -33,6 +33,7 @@
 #include "access/xloginsert.h"
 #include "catalog/pg_control.h"
 #include "common/pg_lzcompress.h"
+#include "common/wal_ctr.h"
 #include "executor/instrument.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
@@ -116,6 +117,17 @@ static uint8 curinsert_flags = 0;
 static XLogRecData hdr_rdt;
 static char *hdr_scratch = NULL;
 
+/*
+ * Buffers and rdata chain used to encrypt the WAL record body before
+ * insertion.  All live in wal_ctr_enc_cxt (allowInCritSection).
+ * Populated whenever this backend inserts a WAL record with a non-empty
+ * body; encryption is unconditional in the prototype.
+ */
+static MemoryContext wal_ctr_enc_cxt = NULL;
+static char *wal_ctr_enc_cipher_buf = NULL;
+static Size wal_ctr_enc_cipher_bufsz = 0;
+static XLogRecData wal_ctr_enc_chain[2];
+
 #define SizeOfXlogOrigin	(sizeof(ReplOriginId) + sizeof(char))
 #define SizeOfXLogTransactionId	(sizeof(TransactionId) + sizeof(char))
 
@@ -137,6 +149,7 @@ static bool begininsert_called = false;
 /* Memory context to hold the registered buffer and data references. */
 static MemoryContext xloginsert_cxt;
 
+static XLogRecData *XLogEncryptRecordBody(XLogRecData *rdt);
 static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info,
 									   XLogRecPtr RedoRecPtr, bool doPageWrites,
 									   XLogRecPtr *fpw_lsn, int *num_fpi,
@@ -530,6 +543,18 @@ XLogInsert(RmgrId rmid, uint8 info)
 								 &fpw_lsn, &num_fpi, &fpi_bytes,
 								 &topxid_included);
 
+		/*
+		 * Encrypt the record body in place via the WAL CTR prototype before
+		 * handing the chain to XLogInsertRecord().  Done outside the WAL
+		 * insert lock so concurrent inserters encrypt in parallel and so
+		 * per-record IVs do not serialise on the lock.  Retries call
+		 * XLogRecordAssemble() again from scratch, so re-encryption with a
+		 * fresh IV is safe.  Zero-body records (XLOG_SWITCH etc.) bypass
+		 * encryption entirely so CopyXLogRecordToWAL's xlog-switch assert
+		 * does not fire.
+		 */
+		rdt = XLogEncryptRecordBody(rdt);
+
 		EndPos = XLogInsertRecord(rdt, fpw_lsn, curinsert_flags, num_fpi,
 								  fpi_bytes, topxid_included);
 	} while (!XLogRecPtrIsValid(EndPos));
@@ -623,7 +648,6 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 				   XLogRecPtr *fpw_lsn, int *num_fpi, uint64 *fpi_bytes,
 				   bool *topxid_included)
 {
-	XLogRecData *rdt;
 	uint64		total_len = 0;
 	int			block_id;
 	pg_crc32c	rdata_crc;
@@ -976,11 +1000,15 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 	 * don't know the prev-link yet.  Thus, the CRC will represent the CRC of
 	 * the whole record in the order: rdata, then backup blocks, then record
 	 * header.
+	 *
+	 * WAL CTR: the body is encrypted after assembly, and XLogEncryptRecordBody
+	 * computes the CRC over the resulting ciphertext.  Folding the plaintext
+	 * body into the CRC here would be a wasted second pass over every record,
+	 * so we leave it out.  Body-less records (XLOG_SWITCH etc.) have no rdata
+	 * to add and bypass encryption, so the bare INIT value is their correct
+	 * partial CRC.
 	 */
 	INIT_CRC32C(rdata_crc);
-	COMP_CRC32C(rdata_crc, hdr_scratch + SizeOfXLogRecord, hdr_rdt.len - SizeOfXLogRecord);
-	for (rdt = hdr_rdt.next; rdt != NULL; rdt = rdt->next)
-		COMP_CRC32C(rdata_crc, rdt->data, rdt->len);
 
 	/*
 	 * Ensure that the XLogRecord is not too large.
@@ -1008,6 +1036,125 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 	rechdr->xl_crc = rdata_crc;
 
 	return &hdr_rdt;
+}
+
+/*
+ * Ensure the lazily-allocated WAL encryption buffer at *buf has room for at
+ * least `needed` bytes, allocating or growing from wal_ctr_enc_cxt as
+ * required.  Safe to call inside a critical section because wal_ctr_enc_cxt
+ * is marked allowInCritSection.
+ */
+static inline void
+ensure_wal_ctr_enc_buf(char **buf, Size *cur_sz, Size needed)
+{
+	if (needed <= *cur_sz)
+		return;
+	if (*buf == NULL)
+		*buf = MemoryContextAlloc(wal_ctr_enc_cxt, needed);
+	else
+		*buf = repalloc(*buf, needed);
+	*cur_sz = needed;
+}
+
+/*
+ * Encrypt the body of the XLogRecord returned by XLogRecordAssemble() with
+ * AES-256-CTR and return a fresh two-entry rdata chain pointing at the
+ * plaintext header followed by the ciphertext body with the IV tail
+ * appended.
+ *
+ * Zero-body records (XLOG_SWITCH etc.) are returned unchanged - they
+ * carry no encryption and no XLR_ENCRYPTED flag.
+ */
+static XLogRecData *
+XLogEncryptRecordBody(XLogRecData *rdt)
+{
+	XLogRecord *rechdr;
+	Size		body_len;
+	Size		cipher_len;
+	Size		off;
+	pg_crc32c	crc;
+	XLogRecData *cur;
+
+	Assert(rdt != NULL && rdt->len >= SizeOfXLogRecord);
+	rechdr = (XLogRecord *) rdt->data;
+
+	body_len = rechdr->xl_tot_len - SizeOfXLogRecord;
+
+	/*
+	 * Skip encryption for body-less records (e.g. XLOG_SWITCH).  Downstream
+	 * CopyXLogRecordToWAL asserts xl_tot_len == SizeOfXLogRecord exactly for
+	 * such records.  Decrypt side passes them through when XLR_ENCRYPTED is
+	 * absent and body_len == 0.
+	 */
+	if (body_len == 0)
+		return rdt;
+
+	/*
+	 * wal_ctr_enc_cxt is created eagerly in InitXLogInsert so we never
+	 * AllocSetContextCreate inside a critical section.
+	 */
+	Assert(wal_ctr_enc_cxt != NULL);
+
+	cipher_len = body_len + WAL_CTR_OVERHEAD;
+
+	ensure_wal_ctr_enc_buf(&wal_ctr_enc_cipher_buf, &wal_ctr_enc_cipher_bufsz,
+						   cipher_len);
+
+	/*
+	 * Mutate the header BEFORE the encrypt call. This is not a strict
+	 * requirement for CTR, but it is for GCM.
+	 */
+	rechdr->xl_tot_len = (uint32) (SizeOfXLogRecord + cipher_len);
+	Assert(rechdr->xl_tot_len <= XLogRecordMaxSize);
+	rechdr->xl_info |= XLR_ENCRYPTED;
+
+	/*
+	 * Encrypt the body segments straight from the rdata chain into
+	 * wal_ctr_enc_cipher_buf, advancing the CTR keystream across the
+	 * EVP_EncryptUpdate calls.  This avoids flattening the chain into a
+	 * separate buffer first.  Ciphertext lives in [0..body_len); the IV /
+	 * counter block is written into [body_len..body_len+16) by
+	 * WalCtrEncryptBegin.
+	 */
+	WalCtrEncryptBegin(wal_ctr_enc_cipher_buf + body_len);
+	off = 0;
+	if (rdt->len > SizeOfXLogRecord)
+	{
+		Size		first_tail = rdt->len - SizeOfXLogRecord;
+
+		WalCtrEncryptUpdate((const char *) rdt->data + SizeOfXLogRecord,
+							wal_ctr_enc_cipher_buf, first_tail);
+		off = first_tail;
+	}
+	for (cur = rdt->next; cur != NULL; cur = cur->next)
+	{
+		if (cur->len == 0)
+			continue;
+		WalCtrEncryptUpdate(cur->data, wal_ctr_enc_cipher_buf + off, cur->len);
+		off += cur->len;
+	}
+	Assert(off == body_len);
+	WalCtrEncryptFinal();
+
+	/*
+	 * Recompute the partial CRC over the ciphertext + IV tail (matching
+	 * XLogRecordAssemble's INIT/COMP-without-FIN convention).
+	 * XLogInsertRecord finishes the CRC over the header once xl_prev is
+	 * assigned.
+	 */
+	INIT_CRC32C(crc);
+	Assert(cipher_len >= WAL_CTR_OVERHEAD);
+	COMP_CRC32C(crc, wal_ctr_enc_cipher_buf, cipher_len);
+	rechdr->xl_crc = crc;
+
+	wal_ctr_enc_chain[0].data = (char *) rechdr;
+	wal_ctr_enc_chain[0].len = SizeOfXLogRecord;
+	wal_ctr_enc_chain[0].next = &wal_ctr_enc_chain[1];
+	wal_ctr_enc_chain[1].data = wal_ctr_enc_cipher_buf;
+	wal_ctr_enc_chain[1].len = cipher_len;
+	wal_ctr_enc_chain[1].next = NULL;
+
+	return &wal_ctr_enc_chain[0];
 }
 
 /*
@@ -1438,4 +1585,24 @@ InitXLogInsert(void)
 	if (hdr_scratch == NULL)
 		hdr_scratch = MemoryContextAllocZero(xloginsert_cxt,
 											 HEADER_SCRATCH_SIZE);
+
+	/*
+	 * Working context for the WAL CTR cipher buffer.  Marked
+	 * allowInCritSection because XLogEncryptRecordBody (re)allocs while
+	 * running under a START_CRIT_SECTION from XLogInsert callers.
+	 */
+	if (wal_ctr_enc_cxt == NULL)
+	{
+		wal_ctr_enc_cxt = AllocSetContextCreate(TopMemoryContext,
+												"WAL CTR encryption",
+												ALLOCSET_DEFAULT_SIZES);
+		MemoryContextAllowInCriticalSection(wal_ctr_enc_cxt, true);
+	}
+
+	/*
+	 * Pre-warm the wal_ctr.c side too: allocate the EVP contexts and load the
+	 * AES key now, outside any critical section, so the WAL hot path never
+	 * calls into OpenSSL allocation on first insert.
+	 */
+	WalCtrInit();
 }
