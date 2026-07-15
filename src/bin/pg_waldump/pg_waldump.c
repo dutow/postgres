@@ -28,6 +28,7 @@
 #include "common/file_utils.h"
 #include "common/logging.h"
 #include "common/relpath.h"
+#include "common/wal_pagelevel.h"
 #include "getopt_long.h"
 #include "pg_waldump.h"
 #include "rmgrdesc.h"
@@ -241,7 +242,38 @@ search_directory(const char *directory, const char *fname, int *WalSegSz)
 		r = read(fd, buf.data, XLOG_BLCKSZ);
 		if (r == XLOG_BLCKSZ)
 		{
-			XLogLongPageHeader longhdr = (XLogLongPageHeader) buf.data;
+			XLogLongPageHeader longhdr;
+			struct stat statbuf;
+			uint32		tli_hex,
+						xlogid_hex,
+						segno_in_xlog_hex;
+			uint64		segsize;
+			XLogRecPtr	page_start_lsn;
+
+			/*
+			 * Decrypt the long header before validating it.  We don't yet
+			 * know WalSegSz (it is in the encrypted header), but we can
+			 * derive the page-start LSN of this segment from the filename
+			 * plus the segment file's on-disk size:
+			 *
+			 *   page_start_lsn = (xlog_id << 32) + segno_in_xlog * segsize
+			 *
+			 * which equals segno * segsize without explicitly computing
+			 * segno.
+			 */
+			if (sscanf(fname, "%8X%8X%8X",
+					   &tli_hex, &xlogid_hex, &segno_in_xlog_hex) != 3)
+				pg_fatal("could not parse WAL segment filename \"%s\"", fname);
+
+			if (fstat(fd, &statbuf) != 0)
+				pg_fatal("could not stat file \"%s\": %m", fname);
+			segsize = (uint64) statbuf.st_size;
+
+			page_start_lsn = ((XLogRecPtr) xlogid_hex << 32) +
+				(XLogRecPtr) segno_in_xlog_hex * segsize;
+			WalPagelevelDecryptPage(buf.data, page_start_lsn);
+
+			longhdr = (XLogLongPageHeader) buf.data;
 
 			if (!IsValidWalSegSize(longhdr->xlp_seg_size))
 			{

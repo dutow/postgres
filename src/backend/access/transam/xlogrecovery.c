@@ -44,6 +44,7 @@
 #include "catalog/pg_control.h"
 #include "commands/tablespace.h"
 #include "common/file_utils.h"
+#include "common/wal_pagelevel.h"
 #include "miscadmin.h"
 #include "nodes/miscnodes.h"
 #include "pgstat.h"
@@ -3423,6 +3424,18 @@ retry:
 	Assert(reqLen <= readLen);
 
 	xlogreader->seg.ws_tli = curFileTLI;
+
+	/*
+	 * Decrypt the page in place before any header inspection.  IV is the
+	 * page-start LSN derived from (readSegNo, readOff); decrypt before the
+	 * existing xlp_magic / xlp_pageaddr validation so it runs against
+	 * plaintext.
+	 */
+	{
+		XLogRecPtr	page_start_lsn = (XLogRecPtr) readSegNo * wal_segment_size +
+									 (XLogRecPtr) readOff;
+		WalPagelevelDecryptPage(readBuf, page_start_lsn);
+	}
 
 	/*
 	 * Check the page header immediately, so that we can retry immediately if

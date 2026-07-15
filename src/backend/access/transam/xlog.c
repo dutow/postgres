@@ -69,6 +69,7 @@
 #include "catalog/pg_database.h"
 #include "common/controldata_utils.h"
 #include "common/file_utils.h"
+#include "common/wal_pagelevel.h"
 #include "executor/instrument.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
@@ -2432,16 +2433,28 @@ XLogWrite(XLogwrtRqst WriteRqst, TimeLineID tli, bool flexible)
 			curridx == XLogCtl->XLogCacheBlck ||
 			finishing_seg)
 		{
+			char	   *from_plain;
 			char	   *from;
 			Size		nbytes;
 			Size		nleft;
 			ssize_t		written;
 			instr_time	start;
+			Size		seg_offset_start = startoffset;
 
 			/* OK to write the page(s) */
-			from = XLogCtl->pages + startidx * (Size) XLOG_BLCKSZ;
+			from_plain = XLogCtl->pages + startidx * (Size) XLOG_BLCKSZ;
 			nbytes = npages * (Size) XLOG_BLCKSZ;
 			nleft = nbytes;
+
+			/*
+			 * Encrypt all pages we are about to write into a per-backend
+			 * scratch buffer.  XLogCtl->pages stays plaintext.  startoffset
+			 * is XLOG_BLCKSZ-aligned here (npages is in pages), so we never
+			 * need an intra-block-offset discard path.
+			 */
+			Assert((startoffset % XLOG_BLCKSZ) == 0);
+			from = WalPagelevelEncryptForWrite(from_plain, nbytes,
+											   openLogSegNo, seg_offset_start);
 			do
 			{
 				errno = 0;
@@ -5566,6 +5579,18 @@ BootStrapXLOG(uint32 data_checksum_version)
 	/* Write the first page with the initial record */
 	errno = 0;
 	pgstat_report_wait_start(WAIT_EVENT_WAL_BOOTSTRAP_WRITE);
+
+	/*
+	 * The bootstrap page bypasses XLogWrite and so does not go through the
+	 * page-level encrypt path there.  Encrypt it in place before writing,
+	 * using IV = page-start LSN of the first usable WAL page (segno=1, off=0).
+	 */
+	{
+		XLogRecPtr	page_start_lsn = (XLogRecPtr) 1 * wal_segment_size;
+		WalPagelevelInit();
+		WalPagelevelEncryptPage((char *) &buffer, page_start_lsn);
+	}
+
 	if (write(openLogFile, &buffer, XLOG_BLCKSZ) != XLOG_BLCKSZ)
 	{
 		/* if write didn't set errno, assume problem is no disk space */

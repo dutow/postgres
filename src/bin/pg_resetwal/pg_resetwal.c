@@ -54,6 +54,7 @@
 #include "common/logging.h"
 #include "common/restricted_token.h"
 #include "common/string.h"
+#include "common/wal_pagelevel.h"
 #include "fe_utils/option_utils.h"
 #include "fe_utils/version.h"
 #include "getopt_long.h"
@@ -1180,6 +1181,16 @@ WriteEmptyXLOG(void)
 			  pg_file_create_mode);
 	if (fd < 0)
 		pg_fatal("could not open file \"%s\": %m", path);
+
+	/*
+	 * Encrypt the synthetic checkpoint page so the cluster can read it via
+	 * the page-level WAL CTR decrypt path on next start.
+	 * IV = page-start LSN of segment newXlogSegNo at offset 0.
+	 */
+	{
+		XLogRecPtr	page_start_lsn = (XLogRecPtr) newXlogSegNo * WalSegSz;
+		WalPagelevelEncryptPage(buffer.data, page_start_lsn);
+	}
 
 	errno = 0;
 	if (write(fd, buffer.data, XLOG_BLCKSZ) != XLOG_BLCKSZ)

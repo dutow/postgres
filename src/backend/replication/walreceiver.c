@@ -59,6 +59,7 @@
 #include "access/xlogrecovery.h"
 #include "access/xlogwait.h"
 #include "catalog/pg_authid.h"
+#include "common/wal_pagelevel.h"
 #include "funcapi.h"
 #include "libpq/pqformat.h"
 #include "libpq/pqsignal.h"
@@ -951,7 +952,33 @@ XLogWalRcvWrite(char *buf, Size nbytes, XLogRecPtr recptr, TimeLineID tli)
 		start = pgstat_prepare_io_time(track_wal_io_timing);
 
 		pgstat_report_wait_start(WAIT_EVENT_WAL_WRITE);
-		byteswritten = pg_pwrite(recvFile, buf, segbytes, (pgoff_t) startoff);
+		{
+			char	   *scratch;
+			Size		pos = 0;
+
+			WalPagelevelInit();
+			scratch = WalPagelevelGetScratch(segbytes);
+			memcpy(scratch, buf, segbytes);
+
+			while (pos < (Size) segbytes)
+			{
+				Size		off_in_seg = (Size) startoff + pos;
+				Size		page_idx = off_in_seg / XLOG_BLCKSZ;
+				Size		off_in_page = off_in_seg % XLOG_BLCKSZ;
+				Size		page_remaining = XLOG_BLCKSZ - off_in_page;
+				Size		chunk = Min(page_remaining, (Size) segbytes - pos);
+				XLogRecPtr	page_start_lsn;
+
+				page_start_lsn = (XLogRecPtr) recvSegNo * wal_segment_size +
+								 (XLogRecPtr) page_idx * XLOG_BLCKSZ;
+				WalPagelevelEncryptRange(scratch + pos, chunk,
+										 page_start_lsn, off_in_page);
+				pos += chunk;
+			}
+
+			byteswritten = pg_pwrite(recvFile, scratch, segbytes,
+									 (pgoff_t) startoff);
+		}
 		pgstat_report_wait_end();
 
 		if (byteswritten <= 0)

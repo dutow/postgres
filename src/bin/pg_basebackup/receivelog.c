@@ -20,6 +20,7 @@
 
 #include "access/xlog_internal.h"
 #include "common/logging.h"
+#include "common/wal_pagelevel.h"
 #include "libpq-fe.h"
 #include "libpq/protocol.h"
 #include "receivelog.h"
@@ -1135,14 +1136,45 @@ ProcessWALDataMsg(PGconn *conn, StreamCtl *stream, char *copybuf, int len,
 			}
 		}
 
-		if (stream->walmethod->ops->write(walfile,
-										  copybuf + hdr_len + bytes_written,
-										  bytes_to_write) != bytes_to_write)
 		{
-			pg_log_error("could not write %d bytes to WAL file \"%s\": %s",
-						 bytes_to_write, walfile->pathname,
-						 GetLastWalMethodError(stream->walmethod));
-			return false;
+			/*
+			 * Encrypt the streamed plaintext page-by-page before writing.
+			 * The wire delivers plaintext (walsender decrypted via WALRead);
+			 * the standby's on-disk WAL must be encrypted so its own
+			 * XLogPageRead/WALRead paths can decrypt it.  Encrypt in place
+			 * into copybuf (caller frees it after this call).
+			 */
+			char	   *segdata = copybuf + hdr_len + bytes_written;
+			Size		pos = 0;
+			XLogSegNo	recvSegNo = *blockpos / WalSegSz;
+			Size		startoff_in_seg = xlogoff;
+
+			WalPagelevelInit();
+
+			while (pos < (Size) bytes_to_write)
+			{
+				Size		off_in_seg = startoff_in_seg + pos;
+				Size		page_idx = off_in_seg / XLOG_BLCKSZ;
+				Size		off_in_page = off_in_seg % XLOG_BLCKSZ;
+				Size		page_remaining = XLOG_BLCKSZ - off_in_page;
+				Size		chunk = Min(page_remaining, (Size) bytes_to_write - pos);
+				XLogRecPtr	page_start_lsn;
+
+				page_start_lsn = (XLogRecPtr) recvSegNo * WalSegSz +
+								 (XLogRecPtr) page_idx * XLOG_BLCKSZ;
+				WalPagelevelEncryptRange(segdata + pos, chunk,
+										 page_start_lsn, off_in_page);
+				pos += chunk;
+			}
+
+			if (stream->walmethod->ops->write(walfile, segdata,
+											  bytes_to_write) != bytes_to_write)
+			{
+				pg_log_error("could not write %d bytes to WAL file \"%s\": %s",
+							 bytes_to_write, walfile->pathname,
+							 GetLastWalMethodError(stream->walmethod));
+				return false;
+			}
 		}
 
 		/* Write was successful, advance our position */

@@ -20,6 +20,7 @@
 #include "common/file_perm.h"
 #include "common/hashfn.h"
 #include "common/logging.h"
+#include "common/wal_pagelevel.h"
 #include "fe_utils/simple_list.h"
 #include "pg_waldump.h"
 
@@ -72,6 +73,9 @@ typedef struct ArchivedWALFile
 	int			read_len;		/* total bytes received from archive for this
 								 * segment (same as buf->len, unless we have
 								 * spilled the data to a temp file) */
+	uint64		segsize;		/* WAL segment size (== tar member size). Used
+								 * to derive the page-start LSN for decryption
+								 * before privateInfo->segsize is known. */
 } ArchivedWALFile;
 
 static uint32 hash_string_pointer(const char *s);
@@ -112,6 +116,7 @@ static void astreamer_waldump_free(astreamer *streamer);
 static bool member_is_wal_file(astreamer_waldump *mystreamer,
 							   astreamer_member *member,
 							   char **fname);
+static XLogRecPtr archive_seg_start_lsn(const char *fname, uint64 segsize);
 
 static const astreamer_ops astreamer_waldump_ops = {
 	.content = astreamer_waldump_content,
@@ -197,20 +202,41 @@ init_archive_reader(XLogDumpPrivate *privateInfo,
 		}
 	}
 
-	/* Extract the WAL segment size from the long page header */
-	longhdr = (XLogLongPageHeader) entry->buf->data;
-
-	if (!IsValidWalSegSize(longhdr->xlp_seg_size))
+	/*
+	 * Extract the WAL segment size from the long page header.
+	 *
+	 * The bytes in entry->buf are page-level AES-CTR ciphertext.  Decrypt a
+	 * local copy of the long header so we can read xlp_seg_size; we leave
+	 * entry->buf as ciphertext because subsequent reads go through
+	 * read_archive_wal_page() (which decrypts into the caller's buffer) or
+	 * via the spill-to-tmpfile path, which is read back through WALRead()
+	 * and decrypted there.
+	 *
+	 * The page-start LSN of the segment's first page is derived from the
+	 * filename plus entry->segsize (== tar member size == WAL segment size).
+	 */
 	{
-		pg_log_error(ngettext("invalid WAL segment size in WAL file from archive \"%s\" (%u byte)",
-							  "invalid WAL segment size in WAL file from archive \"%s\" (%u bytes)",
-							  longhdr->xlp_seg_size),
-					 privateInfo->archive_name, longhdr->xlp_seg_size);
-		pg_log_error_detail("The WAL segment size must be a power of two between 1 MB and 1 GB.");
-		exit(1);
-	}
+		char		hdrbuf[sizeof(XLogLongPageHeaderData)];
+		XLogRecPtr	page_start_lsn;
 
-	privateInfo->segsize = longhdr->xlp_seg_size;
+		memcpy(hdrbuf, entry->buf->data, sizeof(XLogLongPageHeaderData));
+		page_start_lsn = archive_seg_start_lsn(entry->fname, entry->segsize);
+		WalPagelevelDecryptRange(hdrbuf, sizeof(XLogLongPageHeaderData),
+								 page_start_lsn, 0);
+		longhdr = (XLogLongPageHeader) hdrbuf;
+
+		if (!IsValidWalSegSize(longhdr->xlp_seg_size))
+		{
+			pg_log_error(ngettext("invalid WAL segment size in WAL file from archive \"%s\" (%u byte)",
+								  "invalid WAL segment size in WAL file from archive \"%s\" (%u bytes)",
+								  longhdr->xlp_seg_size),
+						 privateInfo->archive_name, longhdr->xlp_seg_size);
+			pg_log_error_detail("The WAL segment size must be a power of two between 1 MB and 1 GB.");
+			exit(1);
+		}
+
+		privateInfo->segsize = longhdr->xlp_seg_size;
+	}
 
 	/*
 	 * With the WAL segment size available, we can now initialize the
@@ -349,6 +375,31 @@ read_archive_wal_page(XLogDumpPrivate *privateInfo, XLogRecPtr targetPagePtr,
 
 			copyBytes = Min(nbytes, bufLen - offset);
 			memcpy(p, buf + offset, copyBytes);
+
+			/*
+			 * The bytes in entry->buf are page-level AES-CTR ciphertext (the
+			 * archive streamer hands us the bytes exactly as they appear in
+			 * the source segment file).  Decrypt the copy now, page by page,
+			 * so the caller sees plaintext just as it would from a regular
+			 * on-disk WAL read.
+			 */
+			{
+				int			pos = 0;
+
+				while (pos < copyBytes)
+				{
+					XLogRecPtr	lsn = recptr + pos;
+					Size		off_in_page = lsn % XLOG_BLCKSZ;
+					Size		page_remaining = XLOG_BLCKSZ - off_in_page;
+					Size		chunk = Min((Size) (copyBytes - pos),
+											page_remaining);
+					XLogRecPtr	page_start_lsn = lsn - off_in_page;
+
+					WalPagelevelDecryptRange(p + pos, chunk,
+											 page_start_lsn, off_in_page);
+					pos += chunk;
+				}
+			}
 
 			/* Update state for read */
 			recptr += copyBytes;
@@ -749,6 +800,7 @@ astreamer_waldump_content(astreamer *streamer, astreamer_member *member,
 				entry->buf = makeStringInfo();
 				entry->spilled = false;
 				entry->read_len = 0;
+				entry->segsize = (uint64) member->size;
 				privateInfo->cur_file = entry;
 			}
 			break;
@@ -842,6 +894,34 @@ member_is_wal_file(astreamer_waldump *mystreamer, astreamer_member *member,
 	*fname = pnstrdup(filename, XLOG_FNAME_LEN);
 
 	return true;
+}
+
+/*
+ * Compute the page-start LSN of the first page of the WAL segment whose
+ * filename is `fname` and whose segment size is `segsize`.
+ *
+ * The XLogFileName encoding is "TLI(8) xlog_id(8) segno_in_xlog(8)", and:
+ *
+ *	 segment_start_lsn = segno * segsize
+ *					   = (xlog_id << 32) + segno_in_xlog * segsize
+ *
+ * Add an in-segment byte offset to get an arbitrary page-start LSN within the
+ * segment.  Used to derive the IV for AES-CTR decryption of WAL pages read
+ * out of a tar archive, where we don't have an open segment file to fstat.
+ */
+static XLogRecPtr
+archive_seg_start_lsn(const char *fname, uint64 segsize)
+{
+	uint32		tli_hex;
+	uint32		xlogid_hex;
+	uint32		segno_in_xlog_hex;
+
+	if (sscanf(fname, "%8X%8X%8X",
+			   &tli_hex, &xlogid_hex, &segno_in_xlog_hex) != 3)
+		pg_fatal("could not parse WAL segment filename \"%s\"", fname);
+
+	return ((XLogRecPtr) xlogid_hex << 32) +
+		(XLogRecPtr) segno_in_xlog_hex * segsize;
 }
 
 /*

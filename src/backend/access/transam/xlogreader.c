@@ -31,6 +31,7 @@
 #include "access/xlogrecord.h"
 #include "catalog/pg_control.h"
 #include "common/pg_lzcompress.h"
+#include "common/wal_pagelevel.h"
 #include "replication/origin.h"
 
 #ifndef FRONTEND
@@ -1613,6 +1614,39 @@ WALRead(XLogReaderState *state,
 		pgstat_count_io_op_time(IOOBJECT_WAL, IOCONTEXT_NORMAL, IOOP_READ,
 								io_start, 1, readbytes);
 #endif
+
+		{
+			/*
+			 * Decrypt page-by-page.  startoff is the in-segment byte offset of
+			 * `p`; readbytes is how many bytes pg_pread returned.  Range may
+			 * begin and/or end mid-page.
+			 */
+			Size		pos = 0;
+
+			while (pos < (Size) readbytes)
+			{
+				Size		off_in_seg = (Size) startoff + pos;
+				Size		page_idx = off_in_seg / XLOG_BLCKSZ;
+				Size		off_in_page = off_in_seg % XLOG_BLCKSZ;
+				Size		page_remaining = XLOG_BLCKSZ - off_in_page;
+				Size		chunk = Min(page_remaining, (Size) readbytes - pos);
+				XLogRecPtr	page_start_lsn;
+
+				page_start_lsn = (XLogRecPtr) state->seg.ws_segno *
+								 state->segcxt.ws_segsize +
+								 (XLogRecPtr) page_idx * XLOG_BLCKSZ;
+
+				/*
+				 * AES-CTR can decrypt any byte-aligned slice within a page.
+				 * Page-aligned reads (XLogPageRead path) hit off_in_page == 0;
+				 * walsender resume can land on any 8-byte-aligned offset, which
+				 * WalPagelevelDecryptRange handles.
+				 */
+				WalPagelevelDecryptRange(p + pos, chunk,
+										 page_start_lsn, off_in_page);
+				pos += chunk;
+			}
+		}
 
 		/* Update state for read */
 		recptr += readbytes;

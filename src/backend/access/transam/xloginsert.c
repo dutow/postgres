@@ -33,6 +33,7 @@
 #include "access/xloginsert.h"
 #include "catalog/pg_control.h"
 #include "common/pg_lzcompress.h"
+#include "common/wal_pagelevel.h"
 #include "executor/instrument.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
@@ -1438,4 +1439,12 @@ InitXLogInsert(void)
 	if (hdr_scratch == NULL)
 		hdr_scratch = MemoryContextAllocZero(xloginsert_cxt,
 											 HEADER_SCRATCH_SIZE);
+
+	/*
+	 * Pre-warm wal_pagelevel.c so its per-backend MemoryContext exists
+	 * before XLogFlush enters a critical section.  Without this, the lazy
+	 * WalPagelevelInit() called from XLogWrite's encrypt path trips the
+	 * MemoryContextCreate Assert(CritSectionCount == 0).
+	 */
+	WalPagelevelInit();
 }

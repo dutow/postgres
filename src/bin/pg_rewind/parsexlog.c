@@ -20,6 +20,7 @@
 #include "catalog/pg_control.h"
 #include "catalog/storage_xlog.h"
 #include "commands/dbcommands_xlog.h"
+#include "common/wal_pagelevel.h"
 #include "fe_utils/archive.h"
 #include "filemap.h"
 #include "pg_rewind.h"
@@ -376,6 +377,13 @@ SimpleXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr,
 	}
 
 	Assert(targetSegNo == xlogreadsegno);
+
+	/*
+	 * On-disk WAL is encrypted; decrypt the page before XLogReader inspects
+	 * it.  IV is the page-start LSN, here equal to targetPagePtr (which is
+	 * always page-aligned).
+	 */
+	WalPagelevelDecryptPage(readBuf, targetPagePtr);
 
 	xlogreader->seg.ws_tli = targetHistory[private->tliIndex].tli;
 	return XLOG_BLCKSZ;
