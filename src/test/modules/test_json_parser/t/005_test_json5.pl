@@ -33,6 +33,7 @@ my @features = (
 	{ name => 'trailing commas', file => 'json5_trailing_commas' },
 	{ name => 'unquoted keys', file => 'json5_keys' },
 	{ name => 'single-quoted strings', file => 'json5_strings' },
+	{ name => 'multi-line strings', file => 'json5_multiline' },
 	{ name => 'numbers', file => 'json5_numbers' },);
 
 # Inputs that stay invalid even in json5 mode.
@@ -175,6 +176,42 @@ foreach my $exe (@exes)
 		check_rejected($exe, inline_file($content),
 			"non-json5 mode: $label form");
 	}
+
+	# Multi-line string continuations are also handled on the "not
+	# de-escaping" path (no -s flag).
+	my $ml_file = "$FindBin::RealBin/../json5_multiline.json5";
+	my ($ml_out, $ml_err) = run_command([ @$exe, "--json5", $ml_file ]);
+
+	like($ml_out, qr/SUCCESS/,
+		"json5 multi-line strings, no de-escaping: parse succeeds");
+	is($ml_err, "",
+		"json5 multi-line strings, no de-escaping: no error output");
+
+	# A backslash-newline continuation in a quoted key's value exercises
+	# the gate directly: a quoted key rules out the unrelated
+	# unquoted-key rejection reached via the fixture file.
+	my $cont_file = inline_file("{ \"a\": \"line \\\nb\" }");
+	my ($cont_out, $cont_err) =
+	  run_command([ @$exe, "-s", "--json5", $cont_file ]);
+
+	is($cont_out, "{\n\"a\": \"line b\"\n}",
+		"json5 mode: backslash-newline continuation accepted");
+	is($cont_err, "",
+		"json5 mode: backslash-newline continuation no error");
+
+	check_rejected($exe, $cont_file,
+		"non-json5 mode: backslash-newline continuation",
+		qr/Escape sequence.*is invalid/s);
+
+	# Same continuation with a lone CR (no LF) as the line terminator.
+	my $cr_file = inline_file("{ \"a\": \"line \\\rb\" }");
+	my ($cr_out, $cr_err) =
+	  run_command([ @$exe, "-s", "--json5", $cr_file ]);
+
+	is($cr_out, "{\n\"a\": \"line b\"\n}",
+		"json5 mode: backslash-cr continuation accepted");
+	is($cr_err, "",
+		"json5 mode: backslash-cr continuation no error");
 }
 
 done_testing();

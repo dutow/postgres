@@ -2432,6 +2432,26 @@ json_lex_string(JsonLexContext *lex)
 					case 't':
 						jsonapi_appendStringInfoChar(lex->strval, '\t');
 						break;
+					case '\n':
+						if (lex->json5)
+						{
+							++lex->line_number;
+							lex->line_start = s + 1;
+							break;
+						}
+						lex->token_start = s;
+						FAIL_AT_CHAR_END(JSON_ESCAPING_INVALID);
+					case '\r':
+						if (lex->json5)
+						{
+							if (s + 1 < end && *(s + 1) == '\n')
+								s++;
+							++lex->line_number;
+							lex->line_start = s + 1;
+							break;
+						}
+						lex->token_start = s;
+						FAIL_AT_CHAR_END(JSON_ESCAPING_INVALID);
 					default:
 
 						/*
@@ -2443,18 +2463,34 @@ json_lex_string(JsonLexContext *lex)
 						FAIL_AT_CHAR_END(JSON_ESCAPING_INVALID);
 				}
 			}
-			else if (strchr("\"\\/bfnrt", *s) == NULL &&
-					 !(lex->json5 && *s == '\''))
+			else
 			{
-				/*
-				 * Simpler processing if we're not bothered about de-escaping
-				 *
-				 * It's very tempting to remove the strchr() call here and
-				 * replace it with a switch statement, but testing so far has
-				 * shown it's not a performance win.
-				 */
-				lex->token_start = s;
-				FAIL_AT_CHAR_END(JSON_ESCAPING_INVALID);
+				if (lex->json5 && *s == '\r')
+				{
+					if (s + 1 < end && *(s + 1) == '\n')
+						s++;
+					++lex->line_number;
+					lex->line_start = s + 1;
+				}
+				else if (lex->json5 && *s == '\n')
+				{
+					++lex->line_number;
+					lex->line_start = s + 1;
+				}
+				else if (strchr("\"\\/bfnrt", *s) == NULL &&
+						 !(lex->json5 && *s == '\''))
+				{
+					/*
+					 * Simpler processing if we're not bothered about
+					 * de-escaping
+					 *
+					 * It's very tempting to remove the strchr() call here and
+					 * replace it with a switch statement, but testing so far
+					 * has shown it's not a performance win.
+					 */
+					lex->token_start = s;
+					FAIL_AT_CHAR_END(JSON_ESCAPING_INVALID);
+				}
 			}
 		}
 		else
