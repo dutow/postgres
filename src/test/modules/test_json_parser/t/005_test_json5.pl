@@ -1,0 +1,90 @@
+
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
+
+# Test JSON5 support in the standalone (recursive descent) JSON parser.
+# Each feature fixture must be accepted in --json5 mode with the
+# expected semantic output, and rejected without --json5.  The
+# incremental parser does not support JSON5.
+
+use strict;
+use warnings FATAL => 'all';
+
+use PostgreSQL::Test::Utils;
+use Test::More;
+use FindBin;
+use File::Temp qw(tempfile);
+
+my $dir = PostgreSQL::Test::Utils::tempdir;
+
+my @exes = (
+	[ "test_json_parser_standalone", ],
+	[ "test_json_parser_standalone", "-o", ],
+	[ "test_json_parser_standalone_shlib", ],
+	[ "test_json_parser_standalone_shlib", "-o", ]);
+
+# One entry per feature: fixture basename plus, where the failing token
+# is predictable, a regex for the error reported without --json5.
+my @features = (
+	{
+		name => 'comments',
+		file => 'json5_comments',
+		error => qr/Token "\/" is invalid/,
+	},);
+
+# Parse $file with --json5 and compare the semantic output against
+# $expected.
+sub check_accepted
+{
+	my ($exe, $file, $expected, $label) = @_;
+
+	my ($stdout, $stderr) = run_command([ @$exe, "-s", "--json5", $file ]);
+
+	is($stderr, "", "$label: no error output");
+
+	my ($fh, $fname) = tempfile(DIR => $dir);
+	print $fh $stdout, "\n";
+	close($fh);
+
+	my @diffopts = ("-u");
+	push(@diffopts, "--strip-trailing-cr") if $windows_os;
+	($stdout, $stderr) =
+	  run_command([ "diff", @diffopts, $fname, $expected ]);
+
+	is($stdout, "", "$label: no output diff");
+	is($stderr, "", "$label: no diff error");
+}
+
+# Check that parsing $file fails, matching $error on stderr if given.
+sub check_rejected
+{
+	my ($exe, $file, $label, $error, @flags) = @_;
+
+	my ($stdout, $stderr) = run_command([ @$exe, "-s", @flags, $file ]);
+
+	unlike($stdout, qr/SUCCESS/, "$label: parsing fails");
+	if (defined $error)
+	{
+		like($stderr, $error, "$label: correct error output");
+	}
+	else
+	{
+		isnt($stderr, "", "$label: error output");
+	}
+}
+
+foreach my $exe (@exes)
+{
+	note "testing executable @$exe";
+
+	foreach my $f (@features)
+	{
+		my $file = "$FindBin::RealBin/../$f->{file}.json5";
+		my $expected = "$FindBin::RealBin/../$f->{file}.out";
+
+		check_accepted($exe, $file, $expected, "json5 $f->{name}");
+		check_rejected($exe, $file, "non-json5 mode: $f->{name}",
+			$f->{error});
+	}
+}
+
+done_testing();

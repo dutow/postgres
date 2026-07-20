@@ -390,7 +390,8 @@ IsValidJsonNumber(const char *str, size_t len)
  */
 JsonLexContext *
 makeJsonLexContextCstringLen(JsonLexContext *lex, const char *json,
-							 size_t len, int encoding, bool need_escapes)
+							 size_t len, int encoding, bool need_escapes,
+							 bool json5)
 {
 	if (lex == NULL)
 	{
@@ -408,6 +409,7 @@ makeJsonLexContextCstringLen(JsonLexContext *lex, const char *json,
 	lex->input_length = len;
 	lex->input_encoding = encoding;
 	lex->need_escapes = need_escapes;
+	lex->json5 = json5;
 	if (need_escapes)
 	{
 		/*
@@ -1849,15 +1851,77 @@ json_lex(JsonLexContext *lex)
 		/* end of partial token processing */
 	}
 
-	/* Skip leading whitespace. */
-	while (s < end && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
+	/*
+	 * Skip whitespace and, in json5 mode, comments.  Comments count as
+	 * whitespace, so this alternates between the two until neither matches.
+	 * json5 is never used with incremental parsing, so a comment can't span
+	 * chunks.
+	 */
+	for (;;)
 	{
-		if (*s++ == '\n')
+		/* Skip leading whitespace. */
+		while (s < end && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
 		{
-			++lex->line_number;
-			lex->line_start = s;
+			if (*s++ == '\n')
+			{
+				++lex->line_number;
+				lex->line_start = s;
+			}
 		}
+
+		if (!lex->json5 || s >= end || *s != '/')
+			break;
+
+		if (s + 1 >= end)
+			break;				/* lone '/': reported as invalid token below */
+
+		if (*(s + 1) == '/')
+		{
+			/* line comment; json5 line terminators are LF and CR */
+			s += 2;
+			while (s < end && *s != '\n' && *s != '\r')
+				s++;
+
+			/*
+			 * The terminator, if any, is consumed as whitespace on the next
+			 * round; at end of input the comment is implicitly closed.
+			 */
+		}
+		else if (*(s + 1) == '*')
+		{
+			/* block comment; star tracks a possible closing '*' */
+			bool		star = false;
+			bool		closed = false;
+
+			s += 2;
+			while (s < end)
+			{
+				char		c = *s++;
+
+				if (star && c == '/')
+				{
+					closed = true;
+					break;
+				}
+				star = (c == '*');
+				if (c == '\n')
+				{
+					++lex->line_number;
+					lex->line_start = s;
+				}
+			}
+			if (!closed)
+			{
+				lex->token_start = s;
+				lex->prev_token_terminator = lex->token_terminator;
+				lex->token_terminator = s;
+				return JSON_UNTERMINATED_COMMENT;
+			}
+		}
+		else
+			break;				/* '/' not a comment: invalid token */
 	}
+
 	lex->token_start = s;
 
 	/* Determine token type. */
@@ -2551,6 +2615,8 @@ json_errdetail(JsonParseErrorType error, JsonLexContext *lex)
 			return _("Unicode high surrogate must not follow a high surrogate.");
 		case JSON_UNICODE_LOW_SURROGATE:
 			return _("Unicode low surrogate must follow a high surrogate.");
+		case JSON_UNTERMINATED_COMMENT:
+			return _("Block comment is not terminated.");
 		case JSON_SEM_ACTION_FAILED:
 			/* fall through to the error code after switch */
 			break;
