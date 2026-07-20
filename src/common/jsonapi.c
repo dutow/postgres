@@ -646,7 +646,11 @@ have_prediction(JsonParserStack *pstack)
 	return pstack->pred_index > 0;
 }
 
-/* reserved words that json5 accepts as unquoted object keys */
+/*
+ * Keywords that json5 accepts as unquoted object keys: the reserved words
+ * true/false/null, plus Infinity/NaN, which lex as numbers but are ordinary
+ * identifiers too.
+ */
 static inline bool
 json5_keyword_key(const JsonLexContext *lex, JsonTokenType tok)
 {
@@ -1631,6 +1635,33 @@ parse_array(JsonLexContext *lex, const JsonSemAction *sem)
 }
 
 /*
+ * Lex a json5 signed Infinity/NaN.  s points at the '+' or '-' and a letter
+ * follows.  The whole identifier word after the sign is scanned, so trailing
+ * identifier characters make the whole word one invalid token instead of
+ * leaving a prefix match behind.  Sets token_type on success.
+ */
+static JsonParseErrorType
+json5_lex_signed_word(JsonLexContext *lex, const char *s)
+{
+	const char *const end = lex->input + lex->input_length;
+	const char *p;
+
+	for (p = s + 1; p < end && (JSON_ALPHANUMERIC_CHAR(*p) || *p == '$'); p++)
+		 /* skip */ ;
+
+	lex->prev_token_terminator = lex->token_terminator;
+	lex->token_terminator = p;
+
+	if ((p - s == 9 && memcmp(s + 1, "Infinity", 8) == 0) ||
+		(p - s == 4 && memcmp(s + 1, "NaN", 3) == 0))
+	{
+		lex->token_type = JSON_TOKEN_NUMBER;
+		return JSON_SUCCESS;
+	}
+	return JSON_INVALID_TOKEN;
+}
+
+/*
  * Lex one token from the input stream.
  *
  * When doing incremental parsing, we can reach the end of the input string
@@ -2047,12 +2078,55 @@ json_lex(JsonLexContext *lex)
 				lex->token_type = JSON_TOKEN_STRING;
 				break;
 			case '-':
+				if (lex->json5 && s + 1 < end &&
+					(*(s + 1) == 'I' || *(s + 1) == 'N'))
+				{
+					/* Signed Infinity/NaN. */
+					result = json5_lex_signed_word(lex, s);
+					if (result != JSON_SUCCESS)
+						return result;
+					break;
+				}
 				/* Negative number. */
 				result = json_lex_number(lex, s + 1, NULL, NULL);
 				if (result != JSON_SUCCESS)
 					return result;
 				lex->token_type = JSON_TOKEN_NUMBER;
 				break;
+			case '+':
+				if (lex->json5)
+				{
+					if (s + 1 < end && (*(s + 1) == 'I' || *(s + 1) == 'N'))
+					{
+						/* Signed Infinity/NaN. */
+						result = json5_lex_signed_word(lex, s);
+						if (result != JSON_SUCCESS)
+							return result;
+						break;
+					}
+					/* Explicit positive sign. */
+					result = json_lex_number(lex, s + 1, NULL, NULL);
+					if (result != JSON_SUCCESS)
+						return result;
+					lex->token_type = JSON_TOKEN_NUMBER;
+					break;
+				}
+				lex->prev_token_terminator = lex->token_terminator;
+				lex->token_terminator = s + 1;
+				return JSON_INVALID_TOKEN;
+			case '.':
+				if (lex->json5)
+				{
+					/* Leading decimal point, e.g. .5 */
+					result = json_lex_number(lex, s, NULL, NULL);
+					if (result != JSON_SUCCESS)
+						return result;
+					lex->token_type = JSON_TOKEN_NUMBER;
+					break;
+				}
+				lex->prev_token_terminator = lex->token_terminator;
+				lex->token_terminator = s + 1;
+				return JSON_INVALID_TOKEN;
 			case '0':
 			case '1':
 			case '2':
@@ -2125,9 +2199,19 @@ json_lex(JsonLexContext *lex)
 					}
 					else if (p - s == 5 && memcmp(s, "false", 5) == 0)
 						lex->token_type = JSON_TOKEN_FALSE;
+					else if (lex->json5 && p - s == 8 && memcmp(s, "Infinity", 8) == 0)
+					{
+						/* also an identifier, so usable as an unquoted key */
+						lex->token_type = JSON_TOKEN_NUMBER;
+						lex->token_is_identifier = true;
+					}
+					else if (lex->json5 && p - s == 3 && memcmp(s, "NaN", 3) == 0)
+					{
+						lex->token_type = JSON_TOKEN_NUMBER;
+						lex->token_is_identifier = true;
+					}
 					else if (lex->json5)
 					{
-						/* Infinity/NaN handled with number extensions */
 json5_identifier:
 						if ((*s >= 'a' && *s <= 'z') ||
 							(*s >= 'A' && *s <= 'Z') ||
@@ -2464,40 +2548,53 @@ json_lex_string(JsonLexContext *lex)
  * If num_err is not NULL, we return an error flag to *num_err rather than
  * raising an error for a badly-formed number.  Also, if total_len is not NULL
  * the distance from lex->input to the token end+1 is returned to *total_len.
+ *
+ * In json5 mode three extensions apply: hex integers (0x1F, no fraction
+ * or exponent part), a leading decimal point (.5), and a bare trailing
+ * decimal point (5.).
  */
 static inline JsonParseErrorType
 json_lex_number(JsonLexContext *lex, const char *s,
 				bool *num_err, size_t *total_len)
 {
 	bool		error = false;
+	bool		is_hex = false;
 	int			len = s - lex->input;
 
 	/* Part (1): leading sign indicator. */
 	/* Caller already did this for us; so do nothing. */
 
-	/* Part (2): parse main digit string. */
-	if (len < lex->input_length && *s == '0')
+	if (lex->json5 && len < lex->input_length && *s == '0' &&
+		len + 1 < lex->input_length &&
+		(*(s + 1) == 'x' || *(s + 1) == 'X'))
 	{
-		s++;
-		len++;
-	}
-	else if (len < lex->input_length && *s >= '1' && *s <= '9')
-	{
-		do
+		/* json5 hex integer, e.g. 0x1F -- no fraction or exponent part. */
+		is_hex = true;
+		s += 2;
+		len += 2;
+		if (len >= lex->input_length ||
+			!((*s >= '0' && *s <= '9') ||
+			  (*s >= 'a' && *s <= 'f') ||
+			  (*s >= 'A' && *s <= 'F')))
+			error = true;
+		else
 		{
-			s++;
-			len++;
-		} while (len < lex->input_length && *s >= '0' && *s <= '9');
+			do
+			{
+				s++;
+				len++;
+			} while (len < lex->input_length &&
+					 ((*s >= '0' && *s <= '9') ||
+					  (*s >= 'a' && *s <= 'f') ||
+					  (*s >= 'A' && *s <= 'F')));
+		}
 	}
-	else
-		error = true;
-
-	/* Part (3): parse optional decimal portion. */
-	if (len < lex->input_length && *s == '.')
+	else if (lex->json5 && len < lex->input_length && *s == '.')
 	{
+		/* Part (2)/(3): json5 leading decimal point, e.g. .5 */
 		s++;
 		len++;
-		if (len == lex->input_length || *s < '0' || *s > '9')
+		if (len >= lex->input_length || *s < '0' || *s > '9')
 			error = true;
 		else
 		{
@@ -2508,9 +2605,52 @@ json_lex_number(JsonLexContext *lex, const char *s,
 			} while (len < lex->input_length && *s >= '0' && *s <= '9');
 		}
 	}
+	else
+	{
+		/* Part (2): parse main digit string. */
+		if (len < lex->input_length && *s == '0')
+		{
+			s++;
+			len++;
+		}
+		else if (len < lex->input_length && *s >= '1' && *s <= '9')
+		{
+			do
+			{
+				s++;
+				len++;
+			} while (len < lex->input_length && *s >= '0' && *s <= '9');
+		}
+		else
+			error = true;
 
-	/* Part (4): parse optional exponent. */
-	if (len < lex->input_length && (*s == 'e' || *s == 'E'))
+		/* Part (3): parse optional decimal portion. */
+		if (len < lex->input_length && *s == '.')
+		{
+			s++;
+			len++;
+			if (len == lex->input_length || *s < '0' || *s > '9')
+			{
+				/* json5 allows a bare trailing decimal point, e.g. 5. */
+				if (!lex->json5)
+					error = true;
+			}
+			else
+			{
+				do
+				{
+					s++;
+					len++;
+				} while (len < lex->input_length && *s >= '0' && *s <= '9');
+			}
+		}
+	}
+
+	/*
+	 * Part (4): parse optional exponent.  Shared by the leading-dot and
+	 * standard paths; hex integers have no exponent part.
+	 */
+	if (!is_hex && len < lex->input_length && (*s == 'e' || *s == 'E'))
 	{
 		s++;
 		len++;
