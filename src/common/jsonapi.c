@@ -1438,6 +1438,8 @@ parse_object(JsonLexContext *lex, const JsonSemAction *sem)
 				result = json_lex(lex);
 				if (result != JSON_SUCCESS)
 					break;
+				if (lex->json5 && lex_peek(lex) == JSON_TOKEN_OBJECT_END)
+					break;
 				result = parse_object_field(lex, sem);
 			}
 			break;
@@ -1549,6 +1551,8 @@ parse_array(JsonLexContext *lex, const JsonSemAction *sem)
 		{
 			result = json_lex(lex);
 			if (result != JSON_SUCCESS)
+				break;
+			if (lex->json5 && lex_peek(lex) == JSON_TOKEN_ARRAY_END)
 				break;
 			result = parse_array_element(lex, sem);
 		}
