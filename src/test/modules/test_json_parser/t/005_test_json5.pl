@@ -30,12 +30,24 @@ my @features = (
 		file => 'json5_comments',
 		error => qr/Token "\/" is invalid/,
 	},
-	{ name => 'trailing commas', file => 'json5_trailing_commas' },);
+	{ name => 'trailing commas', file => 'json5_trailing_commas' },
+	{ name => 'unquoted keys', file => 'json5_keys' },);
 
 # Inputs that stay invalid even in json5 mode.
 my @json5_invalid = (
 	[ 'doubled trailing comma', '[1,,]' ],
-	[ 'doubled trailing comma in object', '{"a":1,,}' ],);
+	[ 'doubled trailing comma in object', '{"a":1,,}' ],
+	[ 'digit-led key', '{ 1a: 1 }' ],
+	[ 'identifier value in object', '{ a: b }' ],
+	[ 'identifier value in array', '[a]' ],
+	[ 'bare identifier', 'undefined' ],
+	[ 'dollar after number', '2$' ],
+	[ 'dollar after number in array', '[25$]' ],
+	[ 'digit as first key', '{1: 1}' ],);
+
+# Valid json5 corner cases not covered by the feature fixtures.
+my @json5_misc_valid = (
+	[ 'reserved word as first key', '{true: 1, a: 2}' ],);
 
 # Write $content to a temp file and return the file name.
 sub inline_file
@@ -108,6 +120,17 @@ foreach my $exe (@exes)
 		my $fname = inline_file($content);
 
 		check_rejected($exe, $fname, "json5 mode: $label", undef, "--json5");
+	}
+
+	foreach my $v (@json5_misc_valid)
+	{
+		my ($label, $content) = @$v;
+		my $fname = inline_file($content);
+
+		my ($stdout, $stderr) = run_command([ @$exe, "--json5", $fname ]);
+
+		like($stdout, qr/SUCCESS/, "json5 mode: $label: parse succeeds");
+		is($stderr, "", "json5 mode: $label: no error output");
 	}
 }
 

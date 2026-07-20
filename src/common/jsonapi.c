@@ -646,6 +646,34 @@ have_prediction(JsonParserStack *pstack)
 	return pstack->pred_index > 0;
 }
 
+/* reserved words that json5 accepts as unquoted object keys */
+static inline bool
+json5_keyword_key(const JsonLexContext *lex, JsonTokenType tok)
+{
+	return tok == JSON_TOKEN_TRUE || tok == JSON_TOKEN_FALSE ||
+		tok == JSON_TOKEN_NULL ||
+		(tok == JSON_TOKEN_NUMBER && lex->token_is_identifier);
+}
+
+/*
+ * Copy the current token verbatim, for a json5 keyword used as an unquoted
+ * object key (the lexer only fills strval for real strings).  Returns NULL
+ * on allocation failure.
+ */
+static char *
+json5_dup_reserved_key(JsonLexContext *lex)
+{
+	size_t		klen = lex->token_terminator - lex->token_start;
+	char	   *fname = ALLOC(klen + 1);
+
+	if (fname != NULL)
+	{
+		memcpy(fname, lex->token_start, klen);
+		fname[klen] = '\0';
+	}
+	return fname;
+}
+
 static inline void
 set_fname(JsonLexContext *lex, char *fname)
 {
@@ -1265,6 +1293,10 @@ parse_scalar(JsonLexContext *lex, const JsonSemAction *sem)
 		tok != JSON_TOKEN_NULL)
 		return report_parse_error(JSON_PARSE_VALUE, lex);
 
+	/* json5 unquoted identifiers are lexed as strings but can't be values */
+	if (tok == JSON_TOKEN_STRING && lex->token_is_identifier)
+		return report_parse_error(JSON_PARSE_VALUE, lex);
+
 	/* if no semantic function, just consume the token */
 	if (sfunc == NULL)
 		return json_lex(lex);
@@ -1327,15 +1359,27 @@ parse_object_field(JsonLexContext *lex, const JsonSemAction *sem)
 	JsonTokenType tok;
 	JsonParseErrorType result;
 
-	if (lex_peek(lex) != JSON_TOKEN_STRING)
-		return report_parse_error(JSON_PARSE_STRING, lex);
-	if ((ostart != NULL || oend != NULL) && lex->need_escapes)
+	if (lex_peek(lex) == JSON_TOKEN_STRING)
 	{
-		/* fname is NULL if need_escapes is false */
-		fname = STRDUP(lex->strval->data);
-		if (fname == NULL)
-			return JSON_OUT_OF_MEMORY;
+		if ((ostart != NULL || oend != NULL) && lex->need_escapes)
+		{
+			/* fname is NULL if need_escapes is false */
+			fname = STRDUP(lex->strval->data);
+			if (fname == NULL)
+				return JSON_OUT_OF_MEMORY;
+		}
 	}
+	else if (lex->json5 && json5_keyword_key(lex, lex_peek(lex)))
+	{
+		if ((ostart != NULL || oend != NULL) && lex->need_escapes)
+		{
+			fname = json5_dup_reserved_key(lex);
+			if (fname == NULL)
+				return JSON_OUT_OF_MEMORY;
+		}
+	}
+	else
+		return report_parse_error(JSON_PARSE_STRING, lex);
 	result = json_lex(lex);
 	if (result != JSON_SUCCESS)
 	{
@@ -1431,6 +1475,16 @@ parse_object(JsonLexContext *lex, const JsonSemAction *sem)
 	tok = lex_peek(lex);
 	switch (tok)
 	{
+		case JSON_TOKEN_TRUE:
+		case JSON_TOKEN_FALSE:
+		case JSON_TOKEN_NULL:
+		case JSON_TOKEN_NUMBER:
+			if (!lex->json5 || !json5_keyword_key(lex, tok))
+			{
+				result = report_parse_error(JSON_PARSE_OBJECT_START, lex);
+				break;
+			}
+			pg_fallthrough;
 		case JSON_TOKEN_STRING:
 			result = parse_object_field(lex, sem);
 			while (result == JSON_SUCCESS && lex_peek(lex) == JSON_TOKEN_COMMA)
@@ -1600,6 +1654,8 @@ json_lex(JsonLexContext *lex)
 
 	if (lex == &failed_oom || lex->inc_state == &failed_inc_oom)
 		return JSON_OUT_OF_MEMORY;
+
+	lex->token_is_identifier = false;
 
 	if (lex->incremental)
 	{
@@ -2014,7 +2070,8 @@ json_lex(JsonLexContext *lex)
 					 * the whole word as an unexpected token, rather than just
 					 * some unintuitive prefix thereof.
 					 */
-					for (p = s; p < end && JSON_ALPHANUMERIC_CHAR(*p); p++)
+					for (p = s; p < end && (JSON_ALPHANUMERIC_CHAR(*p) ||
+											(lex->json5 && *p == '$')); p++)
 						 /* skip */ ;
 
 					/*
@@ -2049,11 +2106,33 @@ json_lex(JsonLexContext *lex)
 							lex->token_type = JSON_TOKEN_TRUE;
 						else if (memcmp(s, "null", 4) == 0)
 							lex->token_type = JSON_TOKEN_NULL;
+						else if (lex->json5)
+							goto json5_identifier;
 						else
 							return JSON_INVALID_TOKEN;
 					}
 					else if (p - s == 5 && memcmp(s, "false", 5) == 0)
 						lex->token_type = JSON_TOKEN_FALSE;
+					else if (lex->json5)
+					{
+						/* Infinity/NaN handled with number extensions */
+json5_identifier:
+						if ((*s >= 'a' && *s <= 'z') ||
+							(*s >= 'A' && *s <= 'Z') ||
+							*s == '_' || *s == '$' ||
+							IS_HIGHBIT_SET(*s))
+						{
+							lex->token_type = JSON_TOKEN_STRING;
+							lex->token_is_identifier = true;
+							if (lex->need_escapes)
+							{
+								jsonapi_resetStringInfo(lex->strval);
+								jsonapi_appendBinaryStringInfo(lex->strval, s, p - s);
+							}
+						}
+						else
+							return JSON_INVALID_TOKEN;
+					}
 					else
 						return JSON_INVALID_TOKEN;
 				}
@@ -2433,9 +2512,11 @@ json_lex_number(JsonLexContext *lex, const char *s,
 	/*
 	 * Check for trailing garbage.  As in json_lex(), any alphanumeric stuff
 	 * here should be considered part of the token for error-reporting
-	 * purposes.
+	 * purposes; in json5 that includes '$'.
 	 */
-	for (; len < lex->input_length && JSON_ALPHANUMERIC_CHAR(*s); s++, len++)
+	for (; len < lex->input_length &&
+		 (JSON_ALPHANUMERIC_CHAR(*s) || (lex->json5 && *s == '$'));
+		 s++, len++)
 		error = true;
 
 	if (total_len != NULL)
