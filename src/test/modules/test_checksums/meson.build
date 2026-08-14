@@ -37,6 +37,7 @@ tests += {
       't/011_rewind.pl',
       't/012_lockstep.pl',
       't/013_backup_online_enable.pl',
+      't/014_rewind_state.pl',
       't/015_restartpoint_window.pl',
     ],
   },

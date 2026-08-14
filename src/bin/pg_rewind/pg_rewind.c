@@ -144,6 +144,7 @@ main(int argc, char **argv)
 	XLogRecPtr	chkptrec;
 	TimeLineID	chkpttli;
 	XLogRecPtr	chkptredo;
+	uint32		chkptdatachecksums;
 	TimeLineID	source_tli;
 	TimeLineID	target_tli;
 	XLogRecPtr	target_wal_endrec;
@@ -471,9 +472,28 @@ main(int argc, char **argv)
 	keepwal_init();
 
 	findLastCheckpoint(datadir_target, divergerec, lastcommontliIndex,
-					   &chkptrec, &chkpttli, &chkptredo, restore_command);
+					   &chkptrec, &chkpttli, &chkptredo, &chkptdatachecksums,
+					   restore_command);
 	pg_log_info("rewinding from last common checkpoint at %X/%08X on timeline %u",
 				LSN_FORMAT_ARGS(chkptrec), chkpttli);
+
+	/*
+	 * Replay on the rewound server resumes from the last common checkpoint
+	 * and adopts the data checksum state recorded there, not the state in the
+	 * control file installed from the source.  If checksums were enabled at
+	 * the divergence point but the source runs without them, the rewound
+	 * server would verify checksums while the blocks copied from the source
+	 * have none.  The control files cannot reveal this: an offline disable on
+	 * the source after the divergence leaves both of them saying "off".
+	 */
+	if (chkptdatachecksums == PG_DATA_CHECKSUM_VERSION &&
+		ControlFile_source.data_checksum_version != PG_DATA_CHECKSUM_VERSION)
+	{
+		pg_log_error("data checksums were enabled at the point of divergence but are disabled on the source server");
+		pg_log_error_detail("Blocks copied from the source would have no checksums, but the rewound server would resume with checksum verification enabled.");
+		pg_log_error_hint("Either enable data checksums on the source server or recreate the target server from a base backup.");
+		exit(1);
+	}
 
 	/* Initialize the hash table to track the status of each file */
 	filehash_init();
@@ -768,6 +788,51 @@ sanityChecks(void)
 		!ControlFile_target.wal_log_hints)
 	{
 		pg_fatal("target server needs to use either data checksums or \"wal_log_hints = on\"");
+	}
+
+	/*
+	 * The rewound target keeps its control file fields from the source, but
+	 * every block the rewind does not copy keeps the target's content.  If
+	 * checksums are enabled on the target and disabled on the source, the
+	 * result would claim enabled checksums while the blocks copied from the
+	 * source have none, and the target would fail checksum verification as
+	 * soon as it reads them.  Refuse that combination, and refuse an
+	 * interrupted online transition on either side, same as pg_checksums.
+	 *
+	 * The opposite mismatch is allowed: recovery under the backup label
+	 * written by pg_rewind adopts the checksum state as of the divergence
+	 * point, so a target without checksums stays without them (or converges
+	 * through the replayed WAL if the source enabled them online), and no
+	 * page can fail verification.  Warn so that an offline change on the
+	 * source is not overlooked.
+	 */
+	if (ControlFile_target.data_checksum_version == PG_DATA_CHECKSUM_INPROGRESS_ON ||
+		ControlFile_target.data_checksum_version == PG_DATA_CHECKSUM_INPROGRESS_OFF)
+	{
+		pg_log_error("an online data checksum state transition was interrupted on the target server");
+		pg_log_error_hint("Start the server and shut it down cleanly to reset the state, then retry; on a standby, let replication complete the transition first.");
+		exit(1);
+	}
+	if (ControlFile_source.data_checksum_version == PG_DATA_CHECKSUM_INPROGRESS_ON ||
+		ControlFile_source.data_checksum_version == PG_DATA_CHECKSUM_INPROGRESS_OFF)
+	{
+		pg_log_error("an online data checksum state transition is incomplete on the source server");
+		pg_log_error_hint("Let the transition complete, or reset the state with a clean restart, then retry.");
+		exit(1);
+	}
+	if (ControlFile_target.data_checksum_version == PG_DATA_CHECKSUM_VERSION &&
+		ControlFile_source.data_checksum_version == PG_DATA_CHECKSUM_OFF)
+	{
+		pg_log_error("data checksums are enabled on the target server but disabled on the source server");
+		pg_log_error_detail("Blocks copied from the source would have no checksums, and the target would fail checksum verification after the rewind.");
+		pg_log_error_hint("Either disable data checksums on the target server or enable them on the source server, then retry.");
+		exit(1);
+	}
+	if (ControlFile_target.data_checksum_version == PG_DATA_CHECKSUM_OFF &&
+		ControlFile_source.data_checksum_version == PG_DATA_CHECKSUM_VERSION)
+	{
+		pg_log_warning("data checksums are disabled on the target server but enabled on the source server");
+		pg_log_warning_detail("The rewound server will keep data checksums disabled unless the source server enabled them online after the point of divergence.");
 	}
 
 	/*
