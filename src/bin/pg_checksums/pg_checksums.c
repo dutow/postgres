@@ -586,6 +586,19 @@ main(int argc, char *argv[])
 		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY)
 		pg_fatal("cluster must be shut down");
 
+	/*
+	 * An inprogress state means an online transition was cut short.  In
+	 * practice only a standby can carry this into a clean shutdown; a primary
+	 * resolves it when the launcher exits.
+	 */
+	if (ControlFile->data_checksum_version == PG_DATA_CHECKSUM_INPROGRESS_ON ||
+		ControlFile->data_checksum_version == PG_DATA_CHECKSUM_INPROGRESS_OFF)
+	{
+		pg_log_error("an online data checksum state transition was interrupted");
+		pg_log_error_hint("Start and cleanly shut down the cluster once to reset the data checksum state, then retry. On a standby, let replication complete the transition first.");
+		exit(1);
+	}
+
 	if (ControlFile->data_checksum_version != PG_DATA_CHECKSUM_VERSION &&
 		mode == PG_MODE_CHECK)
 		pg_fatal("data checksums are not enabled in cluster");
@@ -663,6 +676,12 @@ main(int argc, char *argv[])
 			printf(_("Checksums enabled in cluster\n"));
 		else
 			printf(_("Checksums disabled in cluster\n"));
+
+		printf(_("This change applies to this data directory only.\n"));
+		if (ControlFile->state == DB_SHUTDOWNED_IN_RECOVERY)
+			printf(_("This node appears to be a standby; apply the same change to the primary and all other standbys.\n"));
+		else
+			printf(_("In a replication setup, apply the same change to every node while all are stopped, before restarting any of them.\n"));
 	}
 
 	return 0;
