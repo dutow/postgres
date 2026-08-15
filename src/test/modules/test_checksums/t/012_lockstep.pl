@@ -79,6 +79,16 @@ unlike(
 	qr/does not match the state/,
 	'no mismatch warning once the states match');
 
+# The primary's post-lockstep startup writes a sync record; the
+# standby must match it and stay up.
+$log = PostgreSQL::Test::Utils::slurp_file($standby->logfile);
+unlike(
+	$log,
+	qr/of the node that wrote the WAL/,
+	'no sync mismatch during the lockstep procedure');
+ok(-f $standby->data_dir . '/postmaster.pid',
+	'standby still running after lockstep');
+
 # Every page the standby wrote in this window must carry a checksum.
 $standby->safe_psql('postgres', 'CHECKPOINT;');
 $standby->stop;

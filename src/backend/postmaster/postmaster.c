@@ -478,6 +478,8 @@ typedef struct
 #define EXIT_STATUS_0(st)  ((st) == 0)
 #define EXIT_STATUS_1(st)  (WIFEXITED(st) && WEXITSTATUS(st) == 1)
 #define EXIT_STATUS_3(st)  (WIFEXITED(st) && WEXITSTATUS(st) == 3)
+/* the startup process exits with 4 on a data checksum state mismatch */
+#define EXIT_STATUS_4(st)  (WIFEXITED(st) && WEXITSTATUS(st) == 4)
 
 #ifndef WIN32
 /*
@@ -2293,10 +2295,14 @@ process_pm_child_exit(void)
 				continue;
 			}
 
-			if (EXIT_STATUS_3(exitstatus))
+			if (EXIT_STATUS_3(exitstatus) || EXIT_STATUS_4(exitstatus))
 			{
-				ereport(LOG,
-						(errmsg("shutdown at recovery target")));
+				if (EXIT_STATUS_3(exitstatus))
+					ereport(LOG,
+							(errmsg("shutdown at recovery target")));
+				else
+					ereport(LOG,
+							(errmsg("shutdown at data checksum state mismatch")));
 				StartupStatus = STARTUP_NOT_RUNNING;
 				Shutdown = Max(Shutdown, SmartShutdown);
 				TerminateChildren(SIGTERM);

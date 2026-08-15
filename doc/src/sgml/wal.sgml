@@ -279,7 +279,13 @@
     new state does not propagate over replication.  In a replication setup
     the same change must be applied to all nodes while all of them are
     stopped, as described in <xref linkend="app-pgchecksums"/>.  A standby
-    whose state diverges logs a warning but keeps its local setting.
+    whose state diverges keeps its local setting while catching up over
+    older WAL, but shuts down cleanly when it replays the state a changed
+    node recorded at its startup on the timeline the standby is
+    following; any other archive recovery (such as a targeted
+    point-in-time recovery), a standby with a triggered promotion, or a
+    standby replaying such a record from an older timeline logs a
+    warning instead and proceeds.
    </para>
 
   </sect2>

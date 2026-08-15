@@ -32,70 +32,42 @@ $primary->wait_for_catchup($standby);
 test_checksum_state($primary, 'off');
 test_checksum_state($standby, 'off');
 
-# Scenario 1: enable offline on the primary only.  The standby must
-# stay off, warn about the mismatch, and remain readable.
+# Scenario 1: enable offline on the primary only.  At startup the primary
+# logs a checksum sync record carrying its new state; replaying it makes
+# the diverged standby shut down cleanly instead of continuing with an
+# unsupported mix of states.
 $standby->stop;
+# Dirty a page in WAL the standby has not yet replayed, so that the
+# shutdown at the sync record below has replayed-but-unflushed changes
+# to write out.
+$primary->safe_psql('postgres', "UPDATE t SET a = a WHERE a = 1;");
 $primary->stop;
 $primary->checksum_enable_offline;
 $primary->start;
-$standby->start;
+$primary->safe_psql('postgres', "INSERT INTO t VALUES (0);");
 
 test_checksum_state($primary, 'on');
-test_checksum_state($standby, 'off');
 
 my $logstart = -s $standby->logfile;
-$primary->safe_psql('postgres', "INSERT INTO t VALUES (0);");
-$primary->safe_psql('postgres', "CHECKPOINT;");
-$primary->wait_for_catchup($standby);
-
-test_checksum_state($standby, 'off');
-is( $standby->safe_psql('postgres', "SELECT count(*) FROM t;"),
-	'10001', 'standby readable after offline enable on the primary');
+start_maybe_self_shutdown($standby);
 
 $standby->wait_for_log(
-	qr/does not match the state "on" in the replayed WAL/,
+	qr/does not match the state "on" of the node that wrote the WAL/,
 	$logstart);
+wait_for_self_shutdown($standby);
 
-# Only one warning for the same remote value.
-$primary->safe_psql('postgres', "CHECKPOINT;");
-$primary->wait_for_catchup($standby);
-my $log = PostgreSQL::Test::Utils::slurp_file($standby->logfile, $logstart);
-my @warnings = $log =~ /(does not match the state)/g;
-is(scalar(@warnings), 1, 'mismatch warned once per remote value');
-
-# Matching states re-arm the warning: undo the divergence on the primary,
-# then diverge again to the same value, all without restarting the standby.
-$primary->stop;
-$primary->checksum_disable_offline;
-$primary->start;
+# A plain restart without converging must hit the same record and shut
+# down again: the shutdown must not have let minRecoveryPoint slip past
+# the record it refused to apply.
 $logstart = -s $standby->logfile;
-$primary->safe_psql('postgres', "CHECKPOINT;");
-$primary->wait_for_catchup($standby);
-$log = PostgreSQL::Test::Utils::slurp_file($standby->logfile, $logstart);
-unlike(
-	$log,
-	qr/does not match the state/,
-	'no warning while the states match again');
-
-$primary->stop;
-$primary->checksum_enable_offline;
-$primary->start;
-$primary->safe_psql('postgres', "CHECKPOINT;");
-$primary->wait_for_catchup($standby);
+start_maybe_self_shutdown($standby);
 $standby->wait_for_log(
-	qr/does not match the state "on" in the replayed WAL/,
+	qr/does not match the state "on" of the node that wrote the WAL/,
 	$logstart);
-test_checksum_state($standby, 'off');
+wait_for_self_shutdown($standby);
 
-# The local state survives both clean and immediate restarts.
-$standby->restart;
-test_checksum_state($standby, 'off');
-$standby->stop('immediate');
-$standby->start;
-test_checksum_state($standby, 'off');
-
-# Converge the cluster: enable offline on the standby too.
-$standby->stop;
+# The shutdown is clean, so pg_checksums can converge the standby; no
+# rebuild is needed.
 command_checks_all(
 	[ 'pg_checksums', '--enable', '-D', $standby->data_dir ],
 	0,
@@ -107,6 +79,8 @@ test_checksum_state($standby, 'on');
 $primary->wait_for_catchup($standby);
 is( $standby->safe_psql('postgres', "SELECT count(*) FROM t;"),
 	'10001', 'standby readable after converging');
+
+my $log;
 
 # Scenario 2: disable offline on the standby only.  The replayed
 # checkpoint records of the still-enabled primary must not override it.
@@ -125,11 +99,67 @@ $standby->safe_psql('postgres', "CHECKPOINT;");
 $standby->restart;
 test_checksum_state($standby, 'off');
 $standby->stop('immediate');
+$logstart = -s $standby->logfile;
 $standby->start;
 test_checksum_state($standby, 'off');
 
 is( $standby->safe_psql('postgres', "SELECT count(*) FROM t;"),
 	'10001', 'standby readable with checksums disabled locally');
+
+# Checkpoint-borne mismatches only warn, once per remote value.  The
+# startup replay above already re-replayed a pre-divergence checkpoint
+# and warned; the checkpoints below carry the same state and must not
+# warn again.
+$primary->safe_psql('postgres', "CHECKPOINT;");
+$primary->safe_psql('postgres', "CHECKPOINT;");
+$primary->wait_for_catchup($standby);
+$standby->wait_for_log(
+	qr/does not match the state "on" in the replayed WAL/,
+	$logstart);
+$log = PostgreSQL::Test::Utils::slurp_file($standby->logfile, $logstart);
+my @warnings = $log =~ /(does not match the state)/g;
+is(scalar(@warnings), 1, 'mismatch warned once per remote value');
+
+# Matching states re-arm the warning.
+$standby->stop;
+$standby->checksum_enable_offline;
+$logstart = -s $standby->logfile;
+$standby->start;
+$primary->safe_psql('postgres', "CHECKPOINT;");
+$primary->wait_for_catchup($standby);
+$log = PostgreSQL::Test::Utils::slurp_file($standby->logfile, $logstart);
+unlike(
+	$log,
+	qr/does not match the state/,
+	'no warning while the states match again');
+
+$standby->stop;
+$standby->checksum_disable_offline;
+$logstart = -s $standby->logfile;
+$standby->start;
+$primary->safe_psql('postgres', "CHECKPOINT;");
+$primary->wait_for_catchup($standby);
+$standby->wait_for_log(
+	qr/does not match the state "on" in the replayed WAL/,
+	$logstart);
+
+# A primary restart records its (unchanged) state in the WAL; the
+# diverged standby replays the sync record and shuts down.
+$logstart = -s $standby->logfile;
+$primary->restart;
+$standby->wait_for_log(
+	qr/does not match the state "on" of the node that wrote the WAL/,
+	$logstart);
+wait_for_self_shutdown($standby);
+
+# Converge the standby back and rejoin.
+command_ok([ 'pg_checksums', '--enable', '-D', $standby->data_dir ],
+	'pg_checksums converges the shut-down standby');
+$standby->start;
+test_checksum_state($standby, 'on');
+$primary->wait_for_catchup($standby);
+is( $standby->safe_psql('postgres', "SELECT count(*) FROM t;"),
+	'10001', 'standby readable after converging back');
 
 # Scenario 3: crash-restart right after an online transition, before the
 # next restartpoint.  Replay then resumes from an older restartpoint whose
@@ -138,10 +168,7 @@ is( $standby->safe_psql('postgres', "SELECT count(*) FROM t;"),
 # itself must be re-established by re-replaying the XLOG2_CHECKSUMS record,
 # without a spurious mismatch warning along the way.
 
-# Converge first: bring the standby back to "on" offline.
-$standby->stop;
-$standby->checksum_enable_offline;
-$standby->start;
+# Scenario 2 left both nodes converged at "on".
 test_checksum_state($standby, 'on');
 test_checksum_state($primary, 'on');
 
@@ -219,6 +246,31 @@ wait_for_checksum_state($standby, 'on');
 
 is( $standby->safe_psql('postgres', "SELECT count(*) FROM t;"),
 	'10001', 'standby readable once the transition completes');
+
+# Scenario 5: a sync record the standby has already replayed must not
+# punish a later offline change on the standby.  The record is replayed
+# while the states still match; a restart after the change re-replays it
+# from the restartpoint horizon, but only records past the standby's
+# clean-shutdown replay position count as a rendezvous, so the old record
+# is tolerated just like old checkpoint records are.  Enforcement for
+# this divergence happens at the next new sync record, written by the
+# next primary restart.
+$primary->restart;
+$primary->wait_for_catchup($standby);
+
+$standby->stop;
+$standby->checksum_disable_offline;
+$logstart = -s $standby->logfile;
+$standby->start;
+
+test_checksum_state($standby, 'off');
+$primary->safe_psql('postgres', "CHECKPOINT;");
+$primary->wait_for_catchup($standby);
+$log = PostgreSQL::Test::Utils::slurp_file($standby->logfile, $logstart);
+unlike(
+	$log,
+	qr/of the node that wrote the WAL/,
+	'already-replayed sync record tolerated after offline change');
 
 $standby->stop;
 $primary->stop;

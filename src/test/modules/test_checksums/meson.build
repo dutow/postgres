@@ -39,6 +39,8 @@ tests += {
       't/013_backup_online_enable.pl',
       't/014_rewind_state.pl',
       't/015_restartpoint_window.pl',
+      't/016_archive_standby.pl',
+      't/017_pitr_divergence.pl',
     ],
   },
 }

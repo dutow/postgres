@@ -248,9 +248,17 @@ PostgreSQL documentation
    directory.  In a replication setup the same change must be applied to
    every node: stop all nodes, run
    <application>pg_checksums</application> on each of them, and only then
-   restart them.  If the change is applied inconsistently, each node keeps
-   its own state, and a standby logs a warning when the state recorded in
-   the replayed WAL differs from its own.  The same warning can appear
+   restart them.
+   If the change is applied inconsistently, each node keeps its own
+   state; when a changed node is started it records its new state in the
+   WAL, and a standby that replays such a record from the timeline it is
+   following while in a different state shuts down cleanly
+   rather than continue in an unsupported configuration.  It can be restarted after converging it with
+   <application>pg_checksums</application> or recreating it from a base
+   backup.  A server performing any other archive recovery (such as a
+   targeted point-in-time recovery), a standby whose promotion has been
+   triggered, or a standby replaying such a record from an older
+   timeline logs a warning instead and proceeds.  A warning about mismatching states can appear
    transiently while a standby catches up over WAL written before a
    consistent change; it stops once a checkpoint record carrying the new
    state has been replayed.  A standby whose data directory was never

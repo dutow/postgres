@@ -32,7 +32,7 @@
 /*
  * Each page of XLOG file has a header like this:
  */
-#define XLOG_PAGE_MAGIC 0xD121	/* can be used as WAL version indicator */
+#define XLOG_PAGE_MAGIC 0xD122	/* can be used as WAL version indicator */
 
 typedef struct XLogPageHeaderData
 {
@@ -390,6 +390,13 @@ extern pg_time_t GetLastSegSwitchData(XLogRecPtr *lastSwitchLSN);
 extern XLogRecPtr RequestXLogSwitch(bool mark_unimportant);
 
 extern void GetOldestRestartPoint(XLogRecPtr *oldrecptr, TimeLineID *oldtli);
+
+/*
+ * Exported so that WAL replay can check XLOG2_CHECKSUMS_SYNC records before
+ * publishing any replay progress, see ApplyWalRecord().
+ */
+extern void CheckSyncedDataChecksumState(uint32 synced_version, XLogRecPtr lsn,
+										 bool enforce);
 
 extern void XLogRecGetBlockRefInfo(XLogReaderState *record, bool pretty,
 								   bool detailed_format, StringInfo buf,

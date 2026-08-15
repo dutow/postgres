@@ -80,7 +80,7 @@ xlog2_desc(StringInfo buf, XLogReaderState *record)
 	char	   *rec = XLogRecGetData(record);
 	uint8		info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
 
-	if (info == XLOG2_CHECKSUMS)
+	if (info == XLOG2_CHECKSUMS || info == XLOG2_CHECKSUMS_SYNC)
 	{
 		xl_checksum_state xlrec;
 
@@ -289,6 +289,9 @@ xlog2_identify(uint8 info)
 	{
 		case XLOG2_CHECKSUMS:
 			id = "CHECKSUMS";
+			break;
+		case XLOG2_CHECKSUMS_SYNC:
+			id = "CHECKSUMS_SYNC";
 			break;
 	}
 

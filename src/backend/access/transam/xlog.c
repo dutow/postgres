@@ -774,6 +774,7 @@ static void WALInsertLockRelease(void);
 static void WALInsertLockUpdateInsertingAt(XLogRecPtr insertingAt);
 
 static void XLogChecksums(uint32 new_type);
+static void XLogChecksumsSync(uint32 cur_type);
 
 /*
  * Insert an XLOG record represented by an already-constructed chain of data
@@ -5071,6 +5072,119 @@ CheckReplayedDataChecksumState(uint32 replayed_version)
 }
 
 /*
+ * XLOG2_CHECKSUMS_SYNC records carry the data checksum state of the node
+ * that wrote them, logged when that node started up.  Unlike
+ * checkpoint-borne states, which legitimately disagree while a standby
+ * catches up over WAL that predates a lockstep offline change, a sync
+ * record follows the change: every node that took part in it agrees with
+ * the record.  A mismatch therefore means this node was left out of an
+ * offline change, or made one of its own, which is not a configuration
+ * this server may keep running in.  Shut down cleanly, so that the data
+ * directory stays acceptable to pg_checksums and the administrator can
+ * converge it and simply restart; replay then re-reads this record and
+ * passes the check.  The special exit code makes the postmaster perform
+ * a regular smart shutdown, ending in a shutdown restartpoint, like
+ * recovery_target_action = 'shutdown' does.
+ *
+ * The caller must invoke this before the record's position is published
+ * as replay progress (see ApplyWalRecord): flushes during the shutdown
+ * advance minRecoveryPoint to the published position, and nothing -
+ * including minRecoveryPoint - may move past a record we refused to
+ * apply, or the next recovery would pass it below the consistency point
+ * and never re-check it.
+ *
+ * Only records past the consistency point count.  A record below it was
+ * already replayed by this node in an earlier recovery and before its
+ * last clean shutdown (clean shutdowns persist minRecoveryPoint at the
+ * replayed end, see CreateRestartPoint), and an offline pg_checksums
+ * change requires a clean shutdown: such a record therefore predates any
+ * local offline change, exactly like the old checkpoint records a
+ * restart legitimately re-replays from the restartpoint horizon.  A
+ * record this node shut down at was never applied, so it lies at or past
+ * the consistency point of the next recovery and is checked again.
+ *
+ * The caller decides through "enforce" whether a mismatch shuts the
+ * server down or merely warns (once per observed value, re-armed by a
+ * match, like CheckReplayedDataChecksumState).  The shutdown is only
+ * appropriate when the writer of the record is this node's upstream and
+ * this node intends to keep following it, i.e. in standby mode on the
+ * recovery target timeline with no promotion triggered.  A targeted
+ * archive recovery (PITR) stops being a replica when it promotes and
+ * ends up self-consistent in its own state, so stalling it on an
+ * operator decision would be wrong; a standby whose promotion has been
+ * triggered is about to promote the same way and only drains the
+ * remaining WAL; and a record on a timeline older than the target
+ * asserts divergence against a writer that is no longer this node's
+ * upstream, such as the old primary's records replayed while crossing
+ * a promoted node's timeline switch.
+ *
+ * With recovery_target_timeline = 'latest', a sync record on the old
+ * timeline can be replayed before the newer timeline has been
+ * discovered, and then enforces.  The resulting shutdown is safe: the
+ * restart rescans the available timelines, and the re-checked record,
+ * now below the target, warns and proceeds.
+ */
+void
+CheckSyncedDataChecksumState(uint32 synced_version, XLogRecPtr lsn,
+							 bool enforce)
+{
+	static uint32 last_warned_version = PG_UINT32_MAX;
+	uint32		local_version;
+
+	if (!ArchiveRecoveryRequested)
+		return;
+
+	/* Re-replayed WAL below the consistency point was already checked. */
+	if (!reachedConsistency)
+		return;
+
+	/* Backup label recovery adopts states instead of checking them. */
+	if (adoptChecksumStateFromNextCheckpoint)
+		return;
+
+	SpinLockAcquire(&XLogCtl->info_lck);
+	local_version = XLogCtl->data_checksum_version;
+	SpinLockRelease(&XLogCtl->info_lck);
+
+	if (synced_version == local_version)
+	{
+		last_warned_version = PG_UINT32_MAX;
+		return;
+	}
+
+	if (synced_version == PG_DATA_CHECKSUM_INPROGRESS_ON ||
+		synced_version == PG_DATA_CHECKSUM_INPROGRESS_OFF ||
+		local_version == PG_DATA_CHECKSUM_INPROGRESS_ON ||
+		local_version == PG_DATA_CHECKSUM_INPROGRESS_OFF)
+		return;
+
+	if (!enforce)
+	{
+		if (synced_version == last_warned_version)
+			return;
+		last_warned_version = synced_version;
+		ereport(WARNING,
+				errmsg("data checksum state \"%s\" of this node does not match the state \"%s\" of the node that wrote the WAL",
+					   get_checksum_state_string(local_version),
+					   get_checksum_state_string(synced_version)),
+				errdetail("The data checksum state was most likely changed with pg_checksums on another node."),
+				errhint("Apply the same change with pg_checksums on this node once recovery has ended, unless the difference is intended."));
+		return;
+	}
+
+	ereport(LOG,
+			errmsg("data checksum state \"%s\" of this node does not match the state \"%s\" of the node that wrote the WAL",
+				   get_checksum_state_string(local_version),
+				   get_checksum_state_string(synced_version)),
+			errdetail("The data checksum state was changed with pg_checksums on another node; such changes are local to one data directory.  The server will shut down without replaying past WAL location %X/%08X.",
+					  LSN_FORMAT_ARGS(lsn)),
+			errhint("Apply the same change with pg_checksums on this node, or recreate it from a base backup, then restart it."));
+
+	/* Request a clean shutdown from the postmaster. */
+	proc_exit(4);
+}
+
+/*
  * Adopt the data checksum state found at the redo point of backup label
  * recovery.  Persist it immediately so that a crash before the first
  * restartpoint does not resurrect the state copied with the backup; a crash
@@ -6793,6 +6907,18 @@ StartupXLOG(void)
 	}
 
 	/*
+	 * Log the current data checksum state.  An offline pg_checksums run
+	 * changes only one node's control file and leaves no trace in WAL, so
+	 * checkpoint records downstream nodes replay can legitimately disagree
+	 * with their state while they catch up over WAL that predates a lockstep
+	 * offline change.  A sync record logged at startup settles it: every node
+	 * that followed the lockstep procedure agrees with it, and a node that
+	 * replays a sync record it disagrees with knows it diverged and shuts
+	 * down instead of continuing.
+	 */
+	XLogChecksumsSync(XLogCtl->data_checksum_version);
+
+	/*
 	 * All done with end-of-recovery actions.
 	 *
 	 * Now allow backends to write WAL and update the control file status in
@@ -8342,7 +8468,8 @@ CreateRestartPoint(int flags)
 	 *
 	 * We don't explicitly advance minRecoveryPoint when we do create a
 	 * restartpoint. It's assumed that flushing the buffers will do that as a
-	 * side-effect.
+	 * side-effect.  Shutdown restartpoints are the exception and advance it
+	 * explicitly; see below.
 	 */
 	if (!XLogRecPtrIsValid(lastCheckPointRecPtr) ||
 		lastCheckPoint.redo <= ControlFile->checkPointCopy.redo)
@@ -8451,8 +8578,47 @@ CreateRestartPoint(int flags)
 				LocalMinRecoveryPoint = ControlFile->minRecoveryPoint;
 				LocalMinRecoveryPointTLI = ControlFile->minRecoveryPointTLI;
 			}
+
+			/*
+			 * On a shutdown restartpoint, advance minRecoveryPoint all the
+			 * way to the end of the last replayed record, like the "already
+			 * performed" path above does through its forced
+			 * UpdateMinRecoveryPoint() call.  This is safe: replay has
+			 * stopped for good and CheckPointGuts() has just flushed every
+			 * effect of it to disk, so requiring the next recovery to replay
+			 * back to where we already were only states a fact.
+			 *
+			 * It also gives "record end <= minRecoveryPoint at recovery
+			 * start" an exact meaning: this node already replayed that record
+			 * before its last clean shutdown, and therefore before any
+			 * offline pg_checksums change, which requires a clean shutdown.
+			 * CheckSyncedDataChecksumState() relies on that to tell
+			 * re-replayed XLOG2_CHECKSUMS_SYNC records from new ones. Note
+			 * that a record the node shut down at was never applied, nor
+			 * published as replay progress (see ApplyWalRecord), so neither
+			 * this update nor the forced one - which advances to the
+			 * published position - can move minRecoveryPoint past it, and the
+			 * record is checked again on restart, as the enforcement
+			 * requires.
+			 */
 			if (flags & CHECKPOINT_IS_SHUTDOWN)
+			{
+				XLogRecPtr	replayEndPtr;
+				TimeLineID	replayEndTLI;
+
+				replayEndPtr = GetXLogReplayRecPtr(&replayEndTLI);
+				if (ControlFile->minRecoveryPoint < replayEndPtr)
+				{
+					ControlFile->minRecoveryPoint = replayEndPtr;
+					ControlFile->minRecoveryPointTLI = replayEndTLI;
+
+					/* update local copy */
+					LocalMinRecoveryPoint = ControlFile->minRecoveryPoint;
+					LocalMinRecoveryPointTLI = ControlFile->minRecoveryPointTLI;
+				}
+
 				ControlFile->state = DB_SHUTDOWNED_IN_RECOVERY;
+			}
 		}
 
 		/*
@@ -8925,9 +9091,29 @@ XLogChecksums(uint32 new_type)
 	xlrec.new_checksum_state = new_type;
 
 	XLogBeginInsert();
-	XLogRegisterData((char *) &xlrec, sizeof(xl_checksum_state));
+	XLogRegisterData(&xlrec, sizeof(xl_checksum_state));
 
 	recptr = XLogInsert(RM_XLOG2_ID, XLOG2_CHECKSUMS);
+	XLogFlush(recptr);
+}
+
+/*
+ * Log the current data checksum state for cross-checking on standbys.
+ * Unlike XLOG2_CHECKSUMS this does not represent a state change: replay
+ * verifies the value against the local state instead of adopting it.
+ */
+static void
+XLogChecksumsSync(uint32 cur_type)
+{
+	xl_checksum_state xlrec;
+	XLogRecPtr	recptr;
+
+	xlrec.new_checksum_state = cur_type;
+
+	XLogBeginInsert();
+	XLogRegisterData(&xlrec, sizeof(xl_checksum_state));
+
+	recptr = XLogInsert(RM_XLOG2_ID, XLOG2_CHECKSUMS_SYNC);
 	XLogFlush(recptr);
 }
 
@@ -9472,6 +9658,12 @@ xlog2_redo(XLogReaderState *record)
 		 */
 		EmitAndWaitDataChecksumsBarrier(state.new_checksum_state);
 	}
+	else if (info == XLOG2_CHECKSUMS_SYNC)
+	{
+		/* checked before apply, see ApplyWalRecord; nothing to replay */
+	}
+	else
+		elog(PANIC, "xlog2_redo: unknown op code %u", info);
 }
 
 /*

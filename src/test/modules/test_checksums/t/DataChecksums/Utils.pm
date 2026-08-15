@@ -31,6 +31,7 @@ package DataChecksums::Utils;
 use strict;
 use warnings FATAL => 'all';
 use Exporter 'import';
+use Time::HiRes qw(usleep);
 use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
@@ -40,9 +41,11 @@ our @EXPORT = qw(
   disable_data_checksums
   enable_data_checksums
   random_sleep
+  start_maybe_self_shutdown
   stopmode
   test_checksum_state
   wait_for_checksum_state
+  wait_for_self_shutdown
 );
 
 =pod
@@ -232,6 +235,86 @@ sub stopmode
 {
 	return 'immediate' if (cointoss);
 	return 'fast';
+}
+
+=pod
+
+=item start_maybe_self_shutdown(node)
+
+Start the server at B<node> without insisting that it comes, or stays,
+up.  C<Cluster::start()> cannot be used for a server that is expected to
+stop itself: when the server exits during the pg_ctl wait, pg_ctl still
+reports success and C<start()> bails out on the missing PID file.  The
+caller is expected to follow up with C<wait_for_self_shutdown()>, which
+resynchronizes the Cluster instance.
+
+=cut
+
+sub start_maybe_self_shutdown
+{
+	my ($node) = @_;
+
+	print "### Starting node \"" . $node->name . "\", may stop itself\n";
+
+	# Temporarily unset PGAPPNAME so that the server doesn't inherit
+	# it, same as Cluster::start().
+	local %ENV = $node->_get_env(PGAPPNAME => undef);
+
+	# The exit status is deliberately ignored; the caller asserts the
+	# outcome through the log and wait_for_self_shutdown().
+	PostgreSQL::Test::Utils::run_command(
+		[
+			'pg_ctl', '--wait',
+			'--pgdata' => $node->data_dir,
+			'--log' => $node->logfile,
+			'--options' => '--cluster-name=' . $node->name,
+			'start'
+		]);
+	return;
+}
+
+=item wait_for_self_shutdown(node)
+
+Wait until the server running at B<node> has stopped itself, then check
+via pg_controldata that the shutdown was clean.  Logs test failures on
+timeout or an unclean state.
+
+=cut
+
+sub wait_for_self_shutdown
+{
+	my ($node) = @_;
+	my $datadir = $node->data_dir;
+
+	foreach my $i (1 .. 10 * $PostgreSQL::Test::Utils::timeout_default)
+	{
+		last unless -f "$datadir/postmaster.pid";
+		usleep(100_000);
+	}
+	if (!ok(!-f "$datadir/postmaster.pid",
+			"node " . $node->name . " shut down by itself"))
+	{
+		# Show where the server got stuck, to help diagnose the failure.
+		my @lines = split /\n/,
+		  PostgreSQL::Test::Utils::slurp_file($node->logfile);
+		my $first = @lines > 15 ? @lines - 15 : 0;
+		note("tail of " . $node->logfile . ":\n"
+			  . join("\n", @lines[ $first .. $#lines ]));
+	}
+
+	# Let the Cluster instance notice that the server is gone, so that a
+	# later start() works.  There is no public interface for a server
+	# that stopped on its own; poke the internal state the same way
+	# Cluster itself does after a failed start.
+	$node->_update_pid(0);
+
+	my ($stdout, $stderr) =
+	  PostgreSQL::Test::Utils::run_command([ 'pg_controldata', $datadir ]);
+	like(
+		$stdout,
+		qr/Database cluster state:\s+shut down in recovery/,
+		"node " . $node->name . " stopped cleanly");
+	return;
 }
 
 =pod

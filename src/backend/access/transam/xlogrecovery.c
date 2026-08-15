@@ -1954,6 +1954,32 @@ ApplyWalRecord(XLogReaderState *xlogreader, XLogRecord *record, TimeLineID *repl
 	}
 
 	/*
+	 * Check data checksum sync records before publishing any replay progress:
+	 * if the check shuts the server down, nothing - including
+	 * minRecoveryPoint - may move past the record, so that the next recovery
+	 * re-reads and re-checks it.  A mismatch only enforces the shutdown in
+	 * standby mode and on the target timeline; a targeted recovery, or a
+	 * record from a timeline we are switching away from, warns instead.  Once
+	 * a promotion has been triggered the node is leaving replication, so the
+	 * record is treated like any other non-standby recovery.
+	 */
+	if (record->xl_rmid == RM_XLOG2_ID &&
+		(record->xl_info & ~XLR_INFO_MASK) == XLOG2_CHECKSUMS_SYNC)
+	{
+		xl_checksum_state xlrec;
+		bool		enforce;
+
+		enforce = StandbyModeRequested &&
+			!PromoteIsTriggered() &&
+			*replayTLI == recoveryTargetTLI;
+
+		memcpy(&xlrec, XLogRecGetData(xlogreader), sizeof(xl_checksum_state));
+		CheckSyncedDataChecksumState(xlrec.new_checksum_state,
+									 xlogreader->ReadRecPtr,
+									 enforce);
+	}
+
+	/*
 	 * Update shared replayEndRecPtr before replaying this record, so that
 	 * XLogFlush will update minRecoveryPoint correctly.
 	 */
