@@ -107,6 +107,7 @@ static off_t read_file_data_into_buffer(bbsink *sink,
 										int *checksum_failures);
 static void push_to_sink(bbsink *sink, pg_checksum_context *checksum_ctx,
 						 size_t *bytes_done, void *data, size_t length);
+static bool checksums_still_verifiable(void);
 static bool verify_page_checksum(Page page, XLogRecPtr start_lsn,
 								 BlockNumber blkno,
 								 uint16 *expected_checksum);
@@ -133,6 +134,19 @@ static long long int total_checksum_failures;
 
 /* Do not verify checksums. */
 static bool noverify_checksums = false;
+
+/*
+ * Can data checksums still be verified during this backup?  Set at backup
+ * start if the checkpoint the backup starts from had data checksums fully
+ * enabled, and cleared permanently once the state is seen to leave "on"
+ * while the backup runs.  In both cases pages older than the backup start
+ * can legitimately lack checksums: the pages rewritten while enabling are
+ * only guaranteed to be flushed by the checkpoint following the transition,
+ * and pages written while checksums were off keep their old LSNs.  Thus
+ * verification cannot be resumed once the state has left "on", even if it
+ * returns to "on" later.
+ */
+static bool checksums_verifiable = false;
 
 /*
  * Definition of one element part of an exclusion list, used for paths part
@@ -277,6 +291,7 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 
 	state.startptr = backup_state->startpoint;
 	state.starttli = backup_state->starttli;
+	checksums_verifiable = backup_state->checksums_on;
 
 	/*
 	 * Once do_pg_backup_start has been called, ensure that any failure causes
@@ -1609,13 +1624,14 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 	Assert((sink->bbs_buffer_length % BLCKSZ) == 0);
 
 	/*
-	 * If we weren't told not to verify checksums, and if checksums are
-	 * enabled for this cluster, and if this is a relation file, then verify
-	 * the checksum.  We cannot at this point check if checksums are enabled
-	 * or disabled as that might change, thus we check at each point where we
-	 * could be validating a checksum.
+	 * If we weren't told not to verify checksums, and if checksums have been
+	 * continuously enabled since the checkpoint this backup started from, and
+	 * if this is a relation file, then verify the checksum.  Checksums can
+	 * still be disabled while the backup runs, thus we check at each point
+	 * where we could be validating a checksum.
 	 */
-	if (!noverify_checksums && RelFileNumberIsValid(relfilenumber))
+	if (!noverify_checksums && RelFileNumberIsValid(relfilenumber) &&
+		checksums_still_verifiable())
 		verify_checksum = true;
 
 	/*
@@ -1748,7 +1764,8 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 		 * If the amount of data we were able to read was not a multiple of
 		 * BLCKSZ, we cannot verify checksums, which are block-level.
 		 */
-		if (verify_checksum && DataChecksumsNeedVerify() && (cnt % BLCKSZ != 0))
+		if (verify_checksum && checksums_still_verifiable() &&
+			(cnt % BLCKSZ != 0))
 		{
 			ereport(WARNING,
 					(errmsg("could not verify checksum in file \"%s\", block "
@@ -1876,7 +1893,7 @@ read_file_data_into_buffer(bbsink *sink, const char *readfilename, int fd,
 		 * The data checksum state can change at any point, so we need to
 		 * re-check before each page.
 		 */
-		if (!DataChecksumsNeedVerify())
+		if (!checksums_still_verifiable())
 			return cnt;
 
 		page = sink->bbs_buffer + BLCKSZ * i;
@@ -1905,7 +1922,7 @@ read_file_data_into_buffer(bbsink *sink, const char *readfilename, int fd,
 		 * The data checksum state may also have changed concurrently so check
 		 * again.
 		 */
-		if (!DataChecksumsNeedVerify())
+		if (!checksums_still_verifiable())
 			return cnt;
 		reread_cnt =
 			basebackup_read_file(fd, sink->bbs_buffer + BLCKSZ * i,
@@ -1997,6 +2014,20 @@ push_to_sink(bbsink *sink, pg_checksum_context *checksum_ctx,
 }
 
 /*
+ * Check whether data checksums can still be verified during this backup,
+ * latching verification off for good once the state is seen to leave "on".
+ * See the comment above checksums_verifiable for why it cannot come back.
+ */
+static bool
+checksums_still_verifiable(void)
+{
+	if (checksums_verifiable && !DataChecksumsNeedVerify())
+		checksums_verifiable = false;
+
+	return checksums_verifiable;
+}
+
+/*
  * Try to verify the checksum for the provided page, if it seems appropriate
  * to do so.
  *
@@ -2021,7 +2052,7 @@ verify_page_checksum(Page page, XLogRecPtr start_lsn, BlockNumber blkno,
 	if (PageIsNew(page) || PageGetLSN(page) >= start_lsn)
 		return true;
 
-	if (!DataChecksumsNeedVerify())
+	if (!checksums_still_verifiable())
 		return true;
 
 	/* Perform the actual checksum calculation. */
