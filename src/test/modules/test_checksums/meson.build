@@ -33,6 +33,11 @@ tests += {
       't/007_pgbench_standby.pl',
       't/008_pitr.pl',
       't/009_fpi.pl',
+      't/010_offline_standby.pl',
+      't/011_rewind.pl',
+      't/012_lockstep.pl',
+      't/013_backup_online_enable.pl',
+      't/015_restartpoint_window.pl',
     ],
   },
 }

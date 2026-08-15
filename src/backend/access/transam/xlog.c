@@ -549,6 +549,8 @@ typedef struct XLogCtlData
 	XLogRecPtr	lastCheckPointRecPtr;
 	XLogRecPtr	lastCheckPointEndPtr;
 	CheckPoint	lastCheckPoint;
+	/* local data checksum state as of lastCheckPoint.redo */
+	uint32		lastCheckPointChecksumState;
 
 	/*
 	 * lastFpwDisableRecPtr points to the start of the last replayed
@@ -556,7 +558,7 @@ typedef struct XLogCtlData
 	 */
 	XLogRecPtr	lastFpwDisableRecPtr;
 
-	/* last data_checksum_version we've seen */
+	/* current data checksum state of this node */
 	uint32		data_checksum_version;
 
 	slock_t		info_lck;		/* locks shared variables shown above */
@@ -682,6 +684,26 @@ static ChecksumStateType LocalDataChecksumState = 0;
  */
 int			data_checksums = 0;
 
+/*
+ * Whether replay of the next checkpoint-family record must adopt the data
+ * checksum state it carries.  Set when recovery starts from a base backup,
+ * where the state at the redo point is authoritative over the control file
+ * copied with the backup at a possibly later moment.  Used by StartupXLOG()
+ * and xlog_redo().
+ */
+static bool adoptChecksumStateFromNextCheckpoint = false;
+
+/*
+ * Local data checksum state as of the redo point of the last replayed
+ * checkpoint-start record (an XLOG_CHECKPOINT_REDO record, or a shutdown
+ * checkpoint record, whose redo point is the record itself).
+ * RecoveryRestartPoint() publishes it alongside the checkpoint so that
+ * restartpoints persist a state coherent with the redo pointer replay
+ * would resume from, never one that runs ahead of it.  Only used by the
+ * startup process.
+ */
+static uint32 localChecksumStateAtLastRedo = 0;
+
 /* For WALInsertLockAcquire/Release functions */
 static int	MyLockNo = 0;
 static bool holdingAllLocks = false;
@@ -722,6 +744,8 @@ static void ValidateXLOGDirectoryStructure(void);
 static void CleanupBackupHistory(void);
 static void UpdateMinRecoveryPoint(XLogRecPtr lsn, bool force);
 static bool PerformRecoveryXLogAction(void);
+static void CheckReplayedDataChecksumState(uint32 replayed_version);
+static void AdoptReplayedDataChecksumState(uint32 new_version);
 static void InitControlFile(uint64 sysidentifier, uint32 data_checksum_version);
 static void WriteControlFile(void);
 static void ReadControlFile(void);
@@ -4973,6 +4997,110 @@ SetLocalDataChecksumState(uint32 data_checksum_version)
 	data_checksums = data_checksum_version;
 }
 
+/*
+ * Checkpoint records carry the data checksum state of the node that wrote
+ * the WAL.  That is only useful to cross-check against the state of this
+ * node, which is driven by its own control file and by replayed
+ * XLOG2_CHECKSUMS records: a checkpoint-borne value must not be adopted
+ * during normal replay, or an offline state change made with pg_checksums
+ * on one node of a replication set (which does not generate WAL) would leak
+ * into the others through replay.  Backup label recovery is the one
+ * exception, see AdoptReplayedDataChecksumState().  XLOG_CHECKPOINT_ONLINE
+ * records need no call here:
+ * an online checkpoint's state already traveled in the XLOG_CHECKPOINT_REDO
+ * record that necessarily precedes it, and that one is checked.
+ *
+ * Only archive recovery (streaming or WAL replay from an archive) can see a
+ * legitimate mismatch, because there the WAL and the control file can come
+ * from different nodes or different times.  Plain crash recovery replays
+ * only WAL this node itself wrote, with a control file it itself wrote too,
+ * so a mismatch there is always transient: it means recovery started from a
+ * restartpoint that predates a later, already-applied XLOG2_CHECKSUMS
+ * record, and replaying forward re-establishes the same state again.
+ *
+ * Restartpoints persist the local state as of their redo pointer (see
+ * CreateRestartPoint), so a crash-restart always resumes with a control
+ * file state that agrees with the records it re-replays: any mismatch seen
+ * in archive recovery is a genuine state difference, not a timing artifact.
+ *
+ * Warn once per observed remote value so that a long-lived mismatch does
+ * not spam the log on every checkpoint.  Seeing matching states re-arms
+ * the warning, so a fresh divergence warns again even if it returns to a
+ * previously-warned value.  last_warned_version is plain backend-local
+ * state, which suffices because replay only ever runs in the startup
+ * process; a restart of that process (i.e. a new recovery) re-arms the
+ * warning as well.  Skip the in-progress states, since the nodes
+ * legitimately disagree for the interval between an online transition's
+ * state-change record and the checkpoint that follows it.
+ */
+static void
+CheckReplayedDataChecksumState(uint32 replayed_version)
+{
+	static uint32 last_warned_version = PG_UINT32_MAX;
+	uint32		local_version;
+
+	if (!ArchiveRecoveryRequested)
+		return;
+
+	SpinLockAcquire(&XLogCtl->info_lck);
+	local_version = XLogCtl->data_checksum_version;
+	SpinLockRelease(&XLogCtl->info_lck);
+
+	if (replayed_version == local_version)
+	{
+		last_warned_version = PG_UINT32_MAX;
+		return;
+	}
+
+	if (replayed_version == PG_DATA_CHECKSUM_INPROGRESS_ON ||
+		replayed_version == PG_DATA_CHECKSUM_INPROGRESS_OFF ||
+		local_version == PG_DATA_CHECKSUM_INPROGRESS_ON ||
+		local_version == PG_DATA_CHECKSUM_INPROGRESS_OFF)
+		return;
+
+	if (replayed_version == last_warned_version)
+		return;
+	last_warned_version = replayed_version;
+
+	ereport(WARNING,
+			errmsg("data checksum state \"%s\" of this node does not match the state \"%s\" in the replayed WAL",
+				   get_checksum_state_string(local_version),
+				   get_checksum_state_string(replayed_version)),
+			errdetail("The data checksum state was most likely changed with pg_checksums on another node."),
+			errhint("Apply the same change with pg_checksums on the primary and all standby servers, or rebuild this server from a base backup."));
+}
+
+/*
+ * Adopt the data checksum state found at the redo point of backup label
+ * recovery.  Persist it immediately so that a crash before the first
+ * restartpoint does not resurrect the state copied with the backup; a crash
+ * at this point restarts from the same redo point, so the control file does
+ * not run ahead of the replay position.  If the value is unchanged the
+ * control file already carries it, so both the barrier and the persist are
+ * skipped.
+ */
+static void
+AdoptReplayedDataChecksumState(uint32 new_version)
+{
+	bool		changed;
+
+	SpinLockAcquire(&XLogCtl->info_lck);
+	changed = (XLogCtl->data_checksum_version != new_version);
+	XLogCtl->data_checksum_version = new_version;
+	SetLocalDataChecksumState(new_version);
+	SpinLockRelease(&XLogCtl->info_lck);
+
+	if (!changed)
+		return;
+
+	EmitAndWaitDataChecksumsBarrier(new_version);
+
+	LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+	ControlFile->data_checksum_version = new_version;
+	UpdateControlFile();
+	LWLockRelease(ControlFileLock);
+}
+
 /* guc hook */
 const char *
 show_data_checksums(void)
@@ -6001,6 +6129,36 @@ StartupXLOG(void)
 	SetMultiXactIdLimit(checkPoint.oldestMulti, checkPoint.oldestMultiDB);
 	SetCommitTsLimit(checkPoint.oldestCommitTsXid,
 					 checkPoint.newestCommitTsXid);
+
+	/*
+	 * When recovery starts from a base backup, the control file was copied at
+	 * an arbitrary moment and its data checksum state may differ from the
+	 * state at the redo point, which is what the WAL from there on was
+	 * written under.  Adopt the state of the starting checkpoint: a shutdown
+	 * checkpoint is not replayed, so take it from the record read above; the
+	 * redo point of an online checkpoint is its CHECKPOINT_REDO record, so
+	 * let the replay of that record adopt it.  Check backupStartPoint in
+	 * addition to the label: on a crash restart during backup recovery the
+	 * label file is already renamed away, but the start point persists until
+	 * the backup end record.
+	 */
+	if (haveBackupLabel || XLogRecPtrIsValid(ControlFile->backupStartPoint))
+	{
+		if (wasShutdown)
+			AdoptReplayedDataChecksumState(checkPoint.dataChecksumState);
+		else
+			adoptChecksumStateFromNextCheckpoint = true;
+	}
+
+	/*
+	 * Seed the redo-point snapshot of the local data checksum state from the
+	 * (possibly just adopted) live state.  Replay refreshes the snapshot on
+	 * every checkpoint-start record before a restartpoint can pick it up;
+	 * seeding it here just guarantees it never holds a stale zero.
+	 */
+	SpinLockAcquire(&XLogCtl->info_lck);
+	localChecksumStateAtLastRedo = XLogCtl->data_checksum_version;
+	SpinLockRelease(&XLogCtl->info_lck);
 
 	/*
 	 * Clear out any old relcache cache files.  This is *necessary* if we do
@@ -7712,6 +7870,8 @@ CreateCheckPoint(int flags)
 	}
 	pfree(vxids);
 
+	INJECTION_POINT("create-checkpoint-before-guts", NULL);
+
 	CheckPointGuts(checkPoint.redo, flags);
 
 	vxids = GetVirtualXIDsDelayingChkpt(&nvxids, DELAY_CHKPT_COMPLETE);
@@ -7938,7 +8098,7 @@ CreateEndOfRecoveryRecord(void)
 	ControlFile->minRecoveryPoint = recptr;
 	ControlFile->minRecoveryPointTLI = xlrec.ThisTimeLineID;
 
-	/* start with the latest checksum version (as of the end of recovery) */
+	/* persist the data checksum state this node ended recovery with */
 	SpinLockAcquire(&XLogCtl->info_lck);
 	ControlFile->data_checksum_version = XLogCtl->data_checksum_version;
 	SpinLockRelease(&XLogCtl->info_lck);
@@ -8118,6 +8278,7 @@ RecoveryRestartPoint(const CheckPoint *checkPoint, XLogReaderState *record)
 	XLogCtl->lastCheckPointRecPtr = record->ReadRecPtr;
 	XLogCtl->lastCheckPointEndPtr = record->EndRecPtr;
 	XLogCtl->lastCheckPoint = *checkPoint;
+	XLogCtl->lastCheckPointChecksumState = localChecksumStateAtLastRedo;
 	SpinLockRelease(&XLogCtl->info_lck);
 }
 
@@ -8138,6 +8299,7 @@ CreateRestartPoint(int flags)
 	XLogRecPtr	lastCheckPointRecPtr;
 	XLogRecPtr	lastCheckPointEndPtr;
 	CheckPoint	lastCheckPoint;
+	uint32		lastCheckPointChecksumState;
 	XLogRecPtr	PriorRedoPtr;
 	XLogRecPtr	receivePtr;
 	XLogRecPtr	replayPtr;
@@ -8154,6 +8316,7 @@ CreateRestartPoint(int flags)
 	lastCheckPointRecPtr = XLogCtl->lastCheckPointRecPtr;
 	lastCheckPointEndPtr = XLogCtl->lastCheckPointEndPtr;
 	lastCheckPoint = XLogCtl->lastCheckPoint;
+	lastCheckPointChecksumState = XLogCtl->lastCheckPointChecksumState;
 	SpinLockRelease(&XLogCtl->info_lck);
 
 	/*
@@ -8292,8 +8455,25 @@ CreateRestartPoint(int flags)
 				ControlFile->state = DB_SHUTDOWNED_IN_RECOVERY;
 		}
 
-		/* we shall start with the latest checksum version */
-		ControlFile->data_checksum_version = lastCheckPoint.dataChecksumState;
+		/*
+		 * Persist the data checksum state of this node as of the redo point
+		 * replay resumes from, not the live state, which may already reflect
+		 * transitions replayed after that redo point.  Persisting the live
+		 * state would let the control file run ahead of the restartpoint
+		 * horizon, so that a crash-restart seeds a state older checkpoint
+		 * records do not agree with.  The state carried by the replayed
+		 * checkpoint itself belongs to the node that wrote it and may
+		 * legitimately differ after an offline change on either side;
+		 * ControlFile->checkPointCopy keeps that value as a historical
+		 * record, only this top-level field tracks this node.
+		 *
+		 * The early "already performed" skip above this point sets only
+		 * DB_SHUTDOWNED_IN_RECOVERY, on purpose leaving this field alone: a
+		 * cleanly stopped standby's control file can then lag one transition
+		 * behind, and a later restart replays the missed transition and
+		 * catches the field up.
+		 */
+		ControlFile->data_checksum_version = lastCheckPointChecksumState;
 
 		UpdateControlFile();
 	}
@@ -8936,10 +9116,25 @@ xlog_redo(XLogReaderState *record)
 		/* ControlFile->checkPointCopy always tracks the latest ckpt XID */
 		LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
 		ControlFile->checkPointCopy.nextXid = checkPoint.nextXid;
-		ControlFile->data_checksum_version = checkPoint.dataChecksumState;
 
 		UpdateControlFile();
 		LWLockRelease(ControlFileLock);
+
+		if (adoptChecksumStateFromNextCheckpoint)
+		{
+			adoptChecksumStateFromNextCheckpoint = false;
+			AdoptReplayedDataChecksumState(checkPoint.dataChecksumState);
+		}
+		else
+			CheckReplayedDataChecksumState(checkPoint.dataChecksumState);
+
+		/*
+		 * The redo point of a shutdown checkpoint is the record itself, so
+		 * the local state right now is the state at its redo point.
+		 */
+		SpinLockAcquire(&XLogCtl->info_lck);
+		localChecksumStateAtLastRedo = XLogCtl->data_checksum_version;
+		SpinLockRelease(&XLogCtl->info_lck);
 
 		/*
 		 * We should've already switched to the new TLI before replaying this
@@ -9176,19 +9371,21 @@ xlog_redo(XLogReaderState *record)
 	else if (info == XLOG_CHECKPOINT_REDO)
 	{
 		xl_checkpoint_redo redo_rec;
-		bool		new_state = false;
 
 		memcpy(&redo_rec, XLogRecGetData(record), sizeof(xl_checkpoint_redo));
 
-		SpinLockAcquire(&XLogCtl->info_lck);
-		XLogCtl->data_checksum_version = redo_rec.data_checksum_version;
-		SetLocalDataChecksumState(redo_rec.data_checksum_version);
-		if (redo_rec.data_checksum_version != ControlFile->data_checksum_version)
-			new_state = true;
-		SpinLockRelease(&XLogCtl->info_lck);
+		if (adoptChecksumStateFromNextCheckpoint)
+		{
+			adoptChecksumStateFromNextCheckpoint = false;
+			AdoptReplayedDataChecksumState(redo_rec.data_checksum_version);
+		}
+		else
+			CheckReplayedDataChecksumState(redo_rec.data_checksum_version);
 
-		if (new_state)
-			EmitAndWaitDataChecksumsBarrier(redo_rec.data_checksum_version);
+		/* Remember the local state as of this checkpoint's redo point. */
+		SpinLockAcquire(&XLogCtl->info_lck);
+		localChecksumStateAtLastRedo = XLogCtl->data_checksum_version;
+		SpinLockRelease(&XLogCtl->info_lck);
 	}
 	else if (info == XLOG_LOGICAL_DECODING_STATUS_CHANGE)
 	{
@@ -9252,14 +9449,21 @@ xlog2_redo(XLogReaderState *record)
 
 		memcpy(&state, XLogRecGetData(record), sizeof(xl_checksum_state));
 
+		/*
+		 * Do not persist this into the control file here.  Restartpoints
+		 * persist the state as of their redo pointer and end-of-recovery
+		 * persists the live state, and keeping the control file behind the
+		 * restartpoint horizon means a crash before the next one simply
+		 * replays this record again on the next recovery, re-establishing the
+		 * same state.  Writing it out early would instead let the control
+		 * file run ahead of the point replay resumes from, so that a
+		 * crash-restart starts from a state that older checkpoint records
+		 * earlier in the log do not agree with.
+		 */
 		SpinLockAcquire(&XLogCtl->info_lck);
 		XLogCtl->data_checksum_version = state.new_checksum_state;
+		SetLocalDataChecksumState(state.new_checksum_state);
 		SpinLockRelease(&XLogCtl->info_lck);
-
-		LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
-		ControlFile->data_checksum_version = state.new_checksum_state;
-		UpdateControlFile();
-		LWLockRelease(ControlFileLock);
 
 		/*
 		 * Block on a procsignalbarrier to await all processes having seen the
