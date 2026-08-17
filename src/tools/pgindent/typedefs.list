@@ -4452,6 +4452,7 @@ walrcv_alter_slot_fn
 walrcv_check_conninfo_fn
 walrcv_connect_fn
 walrcv_create_slot_fn
+walrcv_data_checksum_state_fn
 walrcv_disconnect_fn
 walrcv_endstreaming_fn
 walrcv_exec_fn

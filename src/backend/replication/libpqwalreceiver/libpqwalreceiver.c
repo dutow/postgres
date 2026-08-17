@@ -65,6 +65,9 @@ static void libpqrcv_get_senderinfo(WalReceiverConn *conn,
 static char *libpqrcv_identify_system(WalReceiverConn *conn,
 									  TimeLineID *primary_tli,
 									  XLogRecPtr *server_lsn);
+static bool libpqrcv_data_checksum_state(WalReceiverConn *conn,
+										 uint32 *version, uint32 *origin,
+										 XLogRecPtr *fence);
 static char *libpqrcv_get_dbname_from_conninfo(const char *connInfo);
 static char *libpqrcv_get_option_from_conninfo(const char *connInfo,
 											   const char *keyword);
@@ -102,6 +105,7 @@ static WalReceiverFunctionsType PQWalReceiverFunctions = {
 	.walrcv_get_conninfo = libpqrcv_get_conninfo,
 	.walrcv_get_senderinfo = libpqrcv_get_senderinfo,
 	.walrcv_identify_system = libpqrcv_identify_system,
+	.walrcv_data_checksum_state = libpqrcv_data_checksum_state,
 	.walrcv_server_version = libpqrcv_server_version,
 	.walrcv_readtimelinehistoryfile = libpqrcv_readtimelinehistoryfile,
 	.walrcv_startstreaming = libpqrcv_startstreaming,
@@ -472,6 +476,72 @@ libpqrcv_identify_system(WalReceiverConn *conn, TimeLineID *primary_tli,
 	PQclear(res);
 
 	return primary_sysid;
+}
+
+/*
+ * Fetch the data checksum state of the server connected to.
+ *
+ * Returns false when the state could not be fetched; the connection remains
+ * usable in that case.
+ */
+static bool
+libpqrcv_data_checksum_state(WalReceiverConn *conn, uint32 *version,
+							 uint32 *origin, XLogRecPtr *fence)
+{
+	PGresult   *res;
+	uint64		rawversion,
+				raworigin;
+
+	res = libpqsrv_exec(conn->streamConn,
+						"DATA_CHECKSUM_STATE",
+						WAIT_EVENT_LIBPQWALRECEIVER_RECEIVE);
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		/*
+		 * Any failure degrades to no-sample.  An upstream that predates the
+		 * command is the expected case here, and a genuinely broken
+		 * connection fails loudly at the next command anyway.
+		 */
+		elog(DEBUG1, "could not fetch the data checksum state from the upstream server: %s",
+			 pchomp(PQerrorMessage(conn->streamConn)));
+		PQclear(res);
+		return false;
+	}
+	if (PQnfields(res) < 3 || PQntuples(res) != 1)
+		ereport(ERROR,
+				(errcode(ERRCODE_PROTOCOL_VIOLATION),
+				 errmsg("invalid response from primary server"),
+				 errdetail("Could not read the data checksum state: got %d rows and %d fields, expected %d rows and %d or more fields.",
+						   PQntuples(res), PQnfields(res), 1, 3)));
+
+	/* Columns 0 and 1 are uint32 values, sent as int8 to avoid overflow */
+	rawversion = strtou64(PQgetvalue(res, 0, 0), NULL, 10);
+	raworigin = strtou64(PQgetvalue(res, 0, 1), NULL, 10);
+	if (rawversion > PG_UINT32_MAX || raworigin > PG_UINT32_MAX)
+		ereport(ERROR,
+				(errcode(ERRCODE_PROTOCOL_VIOLATION),
+				 errmsg("invalid response from primary server"),
+				 errdetail("Data checksum state values %s and %s are out of range.",
+						   PQgetvalue(res, 0, 0), PQgetvalue(res, 0, 1))));
+	*version = (uint32) rawversion;
+	*origin = (uint32) raworigin;
+
+	/* Column 2 is the fence WAL location */
+	{
+		uint32		hi,
+					lo;
+
+		if (sscanf(PQgetvalue(res, 0, 2), "%X/%X", &hi, &lo) != 2)
+			ereport(ERROR,
+					(errcode(ERRCODE_PROTOCOL_VIOLATION),
+					 errmsg("could not parse WAL location \"%s\"",
+							PQgetvalue(res, 0, 2))));
+		*fence = ((uint64) hi) << 32 | lo;
+	}
+
+	PQclear(res);
+
+	return true;
 }
 
 /*

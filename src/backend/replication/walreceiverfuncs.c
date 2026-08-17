@@ -68,6 +68,7 @@ WalRcvShmemInit(void *arg)
 	ConditionVariableInit(&WalRcv->walRcvStoppedCV);
 	SpinLockInit(&WalRcv->mutex);
 	pg_atomic_init_u64(&WalRcv->writtenUpto, 0);
+	pg_atomic_init_u32(&WalRcv->upstreamChecksumGeneration, 0);
 	WalRcv->procno = INVALID_PROC_NUMBER;
 }
 

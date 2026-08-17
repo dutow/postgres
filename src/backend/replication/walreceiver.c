@@ -162,6 +162,7 @@ WalReceiverMain(const void *startup_data, size_t startup_data_len)
 	TimeLineID	startpointTLI;
 	TimeLineID	primaryTLI;
 	bool		first_stream;
+	bool		upstream_checksum_sampled = false;
 	bool		upstream_catchup_logged = false;
 	TimestampTz upstream_catchup_deadline = 0;
 	WalRcvData *walrcv;
@@ -240,10 +241,23 @@ WalReceiverMain(const void *startup_data, size_t startup_data_len)
 	walrcv->lastMsgSendTime =
 		walrcv->lastMsgReceiptTime = walrcv->latestWalEndTime = now;
 
+	/*
+	 * No upstream data checksum state sampled for this connection yet.  The
+	 * generation bump for this clearing happens below, after the mutex is
+	 * released.
+	 */
+	walrcv->upstreamChecksumValid = false;
+	walrcv->upstreamChecksumVersion = 0;
+	walrcv->upstreamChecksumOrigin = 0;
+	walrcv->upstreamChecksumFence = InvalidXLogRecPtr;
+
 	/* Report our proc number so that others can wake us up */
 	walrcv->procno = MyProcNumber;
 
 	SpinLockRelease(&walrcv->mutex);
+
+	/* Announce the cleared sample (see WalRcvData) */
+	pg_atomic_fetch_add_u32(&walrcv->upstreamChecksumGeneration, 1);
 
 	/* Arrange to clean up at walreceiver exit */
 	on_shmem_exit(WalRcvDie, PointerGetDatum(&startpointTLI));
@@ -342,6 +356,44 @@ WalReceiverMain(const void *startup_data, size_t startup_data_len)
 							   primary_sysid, standby_sysid)));
 		}
 		pfree(primary_sysid);
+
+		/*
+		 * Sample the upstream's data checksum state, once per connection (see
+		 * WalRcvData for why once is enough).  Do it before the timeline
+		 * check below, so that the startup process can evaluate divergence
+		 * even when streaming cannot start.
+		 */
+		if (!upstream_checksum_sampled)
+		{
+			uint32		version = 0;
+			uint32		origin = 0;
+			XLogRecPtr	fence = InvalidXLogRecPtr;
+			bool		valid;
+
+			valid = walrcv_data_checksum_state(wrconn, &version, &origin,
+											   &fence);
+
+			SpinLockAcquire(&walrcv->mutex);
+			walrcv->upstreamChecksumValid = valid;
+			walrcv->upstreamChecksumVersion = version;
+			walrcv->upstreamChecksumOrigin = origin;
+			walrcv->upstreamChecksumFence = fence;
+			SpinLockRelease(&walrcv->mutex);
+
+			/*
+			 * Bump the generation only after publishing the fields, so a
+			 * reader that observes the new generation finds this sample under
+			 * the mutex (see WalRcvData).
+			 */
+			pg_atomic_fetch_add_u32(&walrcv->upstreamChecksumGeneration, 1);
+
+			if (valid)
+				WakeupRecovery();	/* let startup evaluate the sample */
+			else
+				elog(DEBUG1, "no data checksum state available from the upstream server");
+
+			upstream_checksum_sampled = true;
+		}
 
 		/*
 		 * Confirm that the current timeline of the primary is the same or

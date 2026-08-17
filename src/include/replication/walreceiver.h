@@ -118,6 +118,32 @@ typedef struct
 	TimestampTz latestWalEndTime;
 
 	/*
+	 * Data checksum state of the upstream server, sampled once per connection
+	 * right after IDENTIFY_SYSTEM.  Invalid until the sample for the current
+	 * connection has been taken, and left invalid when the upstream does not
+	 * know the DATA_CHECKSUM_STATE command.  The upstream cannot change any
+	 * of this under a live connection except through WAL this node replays:
+	 * an offline pg_checksums change requires the upstream to shut down,
+	 * which drops the connection and forces a fresh sample at reconnect.  The
+	 * sample outlives both the connection and the walreceiver process, and is
+	 * cleared only when the next walreceiver starts; a valid sample does not
+	 * mean streaming is currently in progress.
+	 *
+	 * upstreamChecksumGeneration counts publications of the sample fields,
+	 * including the clearing at walreceiver start.  It is bumped after the
+	 * fields have been published under the mutex, so a reader that sees a new
+	 * generation and then takes the mutex is guaranteed to see the sample
+	 * that generation announced.  Readers can use it to recognize, with a
+	 * single atomic load and no lock, that the sample has not changed since
+	 * they last evaluated it.
+	 */
+	bool		upstreamChecksumValid;
+	uint32		upstreamChecksumVersion;
+	uint32		upstreamChecksumOrigin;
+	XLogRecPtr	upstreamChecksumFence;
+	pg_atomic_uint32 upstreamChecksumGeneration;
+
+	/*
 	 * connection string; initially set to connect to the primary, and later
 	 * clobbered to hide security-sensitive fields.
 	 */
@@ -288,6 +314,20 @@ typedef char *(*walrcv_identify_system_fn) (WalReceiverConn *conn,
 											XLogRecPtr *server_lsn);
 
 /*
+ * walrcv_data_checksum_state_fn
+ *
+ * Run DATA_CHECKSUM_STATE on the cluster connected to and fetch its data
+ * checksum state.  'version' and 'origin' are the raw pg_control values,
+ * and 'fence' is an LSN at or after any WAL-logged transition explaining
+ * the reported state.  Returns false when the server does not support the
+ * command.
+ */
+typedef bool (*walrcv_data_checksum_state_fn) (WalReceiverConn *conn,
+											   uint32 *version,
+											   uint32 *origin,
+											   XLogRecPtr *fence);
+
+/*
  * walrcv_get_dbname_from_conninfo_fn
  *
  * Returns the database name from the primary_conninfo
@@ -420,6 +460,7 @@ typedef struct WalReceiverFunctionsType
 	walrcv_get_conninfo_fn walrcv_get_conninfo;
 	walrcv_get_senderinfo_fn walrcv_get_senderinfo;
 	walrcv_identify_system_fn walrcv_identify_system;
+	walrcv_data_checksum_state_fn walrcv_data_checksum_state;
 	walrcv_get_dbname_from_conninfo_fn walrcv_get_dbname_from_conninfo;
 	walrcv_server_version_fn walrcv_server_version;
 	walrcv_readtimelinehistoryfile_fn walrcv_readtimelinehistoryfile;
@@ -446,6 +487,8 @@ extern PGDLLIMPORT WalReceiverFunctionsType *WalReceiverFunctions;
 	WalReceiverFunctions->walrcv_get_senderinfo(conn, sender_host, sender_port)
 #define walrcv_identify_system(conn, primary_tli, server_lsn) \
 	WalReceiverFunctions->walrcv_identify_system(conn, primary_tli, server_lsn)
+#define walrcv_data_checksum_state(conn, version, origin, fence) \
+	WalReceiverFunctions->walrcv_data_checksum_state(conn, version, origin, fence)
 #define walrcv_get_dbname_from_conninfo(conninfo) \
 	WalReceiverFunctions->walrcv_get_dbname_from_conninfo(conninfo)
 #define walrcv_server_version(conn) \
