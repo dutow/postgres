@@ -285,7 +285,11 @@
     following; any other archive recovery (such as a targeted
     point-in-time recovery), a standby with a triggered promotion, or a
     standby replaying such a record from an older timeline logs a
-    warning instead and proceeds.
+    warning instead and proceeds.  A standby streaming from another node
+    does not need to wait for such a record: it also learns the state of
+    its upstream server whenever the WAL receiver connects, and shuts
+    down in the same way once no WAL that could reconcile a difference
+    remains in transit.
    </para>
 
   </sect2>

@@ -338,6 +338,7 @@ static bool recoveryStopAfter;
 
 /* prototypes for local functions */
 static void ApplyWalRecord(XLogReaderState *xlogreader, XLogRecord *record, TimeLineID *replayTLI);
+static void CheckUpstreamDataChecksumState(void);
 
 static void EnableStandbyMode(void);
 static void readRecoverySignalFile(void);
@@ -1891,6 +1892,172 @@ PerformWalRecovery(void)
 }
 
 /*
+ * End position of the last XLOG2_CHECKSUMS record applied by this
+ * process, for CheckUpstreamDataChecksumState().  Not preserved across
+ * restarts: a fresh recovery takes a fresh sample whose fence lies past
+ * everything an earlier recovery replayed.
+ */
+static XLogRecPtr lastChecksumChangeEndPtr = InvalidXLogRecPtr;
+
+/*
+ * The upstream sample generation last evaluated by
+ * CheckUpstreamDataChecksumState(), and whether that evaluation settled
+ * the sample for good.  A sample is resolved when nothing could make a
+ * later evaluation of the same sample judge differently: the sample is
+ * invalid, the states match, or the sample is stale.  Once resolved, the
+ * per-record check reduces to one atomic generation load; a new
+ * generation clears the flag and forces a full evaluation.
+ *
+ * Resolving on a match stays correct even though a replayed transition
+ * can later move the local state away from the matched sample.  Any
+ * record that does so must have been written after the sample was taken:
+ * a transition written before it is already reflected in the sampled
+ * state, so replaying it only moves the local state toward the sample
+ * (the upstream's barriers serialize transitions, so no second
+ * transition can hide below the fence).  A record written after the
+ * sample lies past the fence, making the sample stale; suppressing the
+ * comparison is then exactly what the staleness guard would do.
+ */
+static uint32 upstreamSampleSeen = 0;
+static bool upstreamSampleResolved = false;
+
+/*
+ * Enforce the data checksum state of the direct upstream, as sampled by
+ * the walreceiver at connection time.
+ *
+ * An offline pg_checksums change is not WAL-logged, so a state difference
+ * against an upstream whose state has an offline origin can never be
+ * reconciled by replay: shut down at once.  A difference against an
+ * online-origin state may still be explained by a WAL-logged transition
+ * in transit; any such transition lies at or before the fence position
+ * the upstream reported together with its state, so once replay passes
+ * the fence a remaining difference is real.  In-progress states are
+ * skipped: a moving transition resolves through replay.
+ *
+ * The upstream cannot change any of this under a live connection except
+ * through WAL we replay: an offline change requires it to shut down,
+ * which drops the connection and forces a fresh sample at reconnect.
+ * The one thing that can change under a live connection is the state
+ * itself, through an online transition WAL-logged after the sample was
+ * taken.  Replaying such a record rewrites the local state, so a
+ * comparison against the connect-time sample would judge the local
+ * state against an upstream value that no longer exists.  Any such
+ * record lies past the fence: skip the sample once one has been
+ * replayed (see lastChecksumChangeEndPtr).  Nothing is lost by that:
+ * replayed transitions keep the local state equal to the upstream's
+ * WAL-driven state, so no real divergence can arise until one side
+ * makes an offline change, which requires a shutdown on that side and
+ * therefore a reconnect that takes a fresh sample.
+ *
+ * Unlike the sync-record check this is not tied to a record being
+ * refused, so stopping between records is safe regardless of what
+ * minRecoveryPoint does.
+ *
+ * The shutdown is scoped like the sync-record enforcement: only a
+ * standby that intends to keep following its upstream stops; a node
+ * whose promotion has been triggered is leaving replication and must
+ * not be blocked from promoting.
+ */
+static void
+CheckUpstreamDataChecksumState(void)
+{
+	bool		valid;
+	uint32		up_version;
+	uint32		up_origin;
+	XLogRecPtr	fence;
+	uint32		local_version;
+	uint32		generation;
+
+	if (!StandbyModeRequested || PromoteIsTriggered() || !reachedConsistency)
+		return;
+
+	/*
+	 * Skip the locked evaluation below once the current sample has been
+	 * resolved (see upstreamSampleResolved); being called for every replayed
+	 * record, the check must be cheap in the steady state.  The walreceiver
+	 * bumps the generation only after publishing a sample, so seeing a new
+	 * generation here guarantees that the locked read finds that sample; the
+	 * reverse race, reading a stale generation for a sample already
+	 * published, only delays the full evaluation to the next call.
+	 */
+	generation = pg_atomic_read_u32(&WalRcv->upstreamChecksumGeneration);
+	if (generation == upstreamSampleSeen && upstreamSampleResolved)
+		return;
+	if (generation != upstreamSampleSeen)
+	{
+		upstreamSampleSeen = generation;
+		upstreamSampleResolved = false;
+	}
+
+	SpinLockAcquire(&WalRcv->mutex);
+	valid = WalRcv->upstreamChecksumValid;
+	up_version = WalRcv->upstreamChecksumVersion;
+	up_origin = WalRcv->upstreamChecksumOrigin;
+	fence = WalRcv->upstreamChecksumFence;
+	SpinLockRelease(&WalRcv->mutex);
+
+	if (!valid)
+	{
+		upstreamSampleResolved = true;
+		return;
+	}
+
+	GetDataChecksumVersionAndOrigin(&local_version, NULL);
+
+	if (up_version == local_version)
+	{
+		upstreamSampleResolved = true;
+		return;
+	}
+
+	/*
+	 * A transition in flight resolves through replay; do not judge it, and do
+	 * not resolve the sample either: the states it settles into must still be
+	 * compared.
+	 */
+	if (up_version == PG_DATA_CHECKSUM_INPROGRESS_ON ||
+		up_version == PG_DATA_CHECKSUM_INPROGRESS_OFF ||
+		local_version == PG_DATA_CHECKSUM_INPROGRESS_ON ||
+		local_version == PG_DATA_CHECKSUM_INPROGRESS_OFF)
+		return;
+
+	/*
+	 * A transition record past the fence rewrote the local state after the
+	 * sample was taken; the sample is stale (see the header comment), and
+	 * stays stale for its lifetime: nothing moves the record's position back
+	 * below the fence.
+	 */
+	if (lastChecksumChangeEndPtr > fence)
+	{
+		upstreamSampleResolved = true;
+		return;
+	}
+
+	/*
+	 * The fence is compared against the post-redo replay position on purpose:
+	 * a transition record at the fence must have finished its redo, which
+	 * updates the local state, before the difference is judged.  Still
+	 * waiting, so the sample is not resolved: the comparison must be retried
+	 * until replay passes the fence.
+	 */
+	if (up_origin == PG_DATA_CHECKSUM_ORIGIN_ONLINE &&
+		GetXLogReplayRecPtr(NULL) < fence)
+		return;
+
+	ereport(LOG,
+			errmsg("data checksum state \"%s\" of this node does not match the state \"%s\" of its upstream server",
+				   get_checksum_state_string(local_version),
+				   get_checksum_state_string(up_version)),
+			up_origin != PG_DATA_CHECKSUM_ORIGIN_ONLINE
+			? errdetail("The data checksum state of the upstream server was set with pg_checksums; such states are local to one data directory and cannot be reconciled through replication.  The server will shut down.")
+			: errdetail("The data checksum state of this node was most likely changed with pg_checksums, and no WAL remains in transit that could reconcile the states.  The server will shut down."),
+			errhint("Apply the same change with pg_checksums on this node, or recreate it from a base backup, then restart it."));
+
+	/* Request a clean shutdown from the postmaster. */
+	proc_exit(4);
+}
+
+/*
  * Subroutine of PerformWalRecovery, to apply one WAL record.
  */
 static void
@@ -1978,6 +2145,18 @@ ApplyWalRecord(XLogReaderState *xlogreader, XLogRecord *record, TimeLineID *repl
 									 xlogreader->ReadRecPtr,
 									 enforce);
 	}
+
+	/*
+	 * Remember data checksum transitions, which rewrite the local state
+	 * during redo below; CheckUpstreamDataChecksumState() uses the position
+	 * to recognize a stale upstream sample.
+	 */
+	if (record->xl_rmid == RM_XLOG2_ID &&
+		(record->xl_info & ~XLR_INFO_MASK) == XLOG2_CHECKSUMS)
+		lastChecksumChangeEndPtr = xlogreader->EndRecPtr;
+
+	/* Evaluated per record, so a busy standby notices a sample promptly. */
+	CheckUpstreamDataChecksumState();
 
 	/*
 	 * Update shared replayEndRecPtr before replaying this record, so that
@@ -4025,6 +4204,16 @@ WaitForWALToBecomeAvailable(XLogRecPtr RecPtr, bool randAccess,
 
 					/* Update pg_stat_recovery_prefetch before sleeping. */
 					XLogPrefetcherComputeStats(xlogprefetcher);
+
+					/*
+					 * Evaluate the upstream data checksum sample before
+					 * sleeping.  The walreceiver sets recoveryWakeupLatch
+					 * after publishing a sample, and the loop funnels back
+					 * into this branch after the latch is reset, so an idle
+					 * standby with no records to apply still reaches this
+					 * check promptly.
+					 */
+					CheckUpstreamDataChecksumState();
 
 					/*
 					 * Wait for more WAL to arrive, when we will be woken

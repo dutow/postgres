@@ -4,7 +4,8 @@
 # Checksums enabled on the target, or at the point of divergence, with
 # a source running without them are refused: the rewound server would
 # verify checksums on blocks copied from a source that has none.  The
-# opposite mismatch only warns; replay keeps the target's own state.
+# opposite mismatch only warns; replay keeps the target's own state,
+# and the divergence is enforced when the rewound server connects.
 use strict;
 use warnings FATAL => 'all';
 
@@ -118,15 +119,26 @@ like(
 	'warns for a disabled target with an enabled source');
 like($stderr, qr/Done!/, 'rewind completed despite the warning');
 
-# The rewound server follows D and keeps its own state.
+# Replay does not adopt the source's state, so the rewound server comes
+# up diverged and its reconnect judges the sampled upstream state: an
+# offline-origin difference shuts it down at once.  The clean shutdown
+# lets pg_checksums converge it, after which it follows D.
 $node_c->append_conf('postgresql.conf', 'port = ' . $node_c->port);
 $node_c->enable_streaming($node_d);
 $node_c->set_standby_mode;
+my $logstart = -s $node_c->logfile;
+start_maybe_self_shutdown($node_c);
+$node_c->wait_for_log(
+	qr/does not match the state "on" of its upstream server/, $logstart);
+wait_for_self_shutdown($node_c);
+
+command_ok([ 'pg_checksums', '--enable', '-D', $node_c->data_dir ],
+	'pg_checksums converges the rewound server');
 $node_c->start;
 $node_d->wait_for_catchup($node_c);
 is( $node_c->safe_psql('postgres', "SELECT count(*) FROM t;"),
 	'10001', 'rewound server readable as a standby');
-test_checksum_state($node_c, 'off');
+test_checksum_state($node_c, 'on');
 
 $node_c->stop;
 $node_d->stop;
