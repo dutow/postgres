@@ -270,6 +270,8 @@ extern void SetDataChecksumsOn(void);
 extern void SetDataChecksumsOff(void);
 extern const char *show_data_checksums(void);
 extern const char *get_checksum_state_string(uint32 state);
+extern const char *get_checksum_origin_string(uint32 origin);
+extern void GetDataChecksumVersionAndOrigin(uint32 *version, uint32 *origin);
 extern void InitLocalDataChecksumState(void);
 extern void SetLocalDataChecksumState(uint32 data_checksum_version);
 extern bool GetDefaultCharSignedness(void);

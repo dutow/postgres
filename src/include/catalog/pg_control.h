@@ -22,7 +22,7 @@
 
 
 /* Version identifier for this pg_control format */
-#define PG_CONTROL_VERSION	1902
+#define PG_CONTROL_VERSION	1903
 
 /* Nonce key length, see below */
 #define MOCK_AUTH_NONCE_LEN		32
@@ -231,6 +231,13 @@ typedef struct ControlFileData
 
 	/* Are data pages protected by checksums? Zero if no checksum version */
 	uint32		data_checksum_version;
+
+	/*
+	 * How data_checksum_version came to be: through a WAL-logged online
+	 * transition, or through an offline change with pg_checksums.  Values are
+	 * from the DataChecksumOrigin enum in storage/checksum.h.
+	 */
+	uint32		data_checksum_origin;
 
 	/*
 	 * True if the default signedness of char is "signed" on a platform where

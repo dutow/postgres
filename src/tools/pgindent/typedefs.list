@@ -635,6 +635,7 @@ DSMRegistryCtxStruct
 DSMRegistryEntry
 DWORD
 DWORD64
+DataChecksumOrigin
 DataChecksumsStateStruct
 DataChecksumsWorkerDatabase
 DataChecksumsWorkerOperation

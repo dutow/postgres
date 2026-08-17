@@ -74,6 +74,23 @@ get_checksum_state_string(uint32 state)
 	return "?";
 }
 
+const char *
+get_checksum_origin_string(uint32 origin)
+{
+	switch (origin)
+	{
+		case PG_DATA_CHECKSUM_ORIGIN_ONLINE:
+			return "online";
+		case PG_DATA_CHECKSUM_ORIGIN_OFFLINE_ENABLE:
+			return "offline-enable";
+		case PG_DATA_CHECKSUM_ORIGIN_OFFLINE_DISABLE:
+			return "offline-disable";
+	}
+
+	Assert(false);
+	return "?";
+}
+
 void
 xlog2_desc(StringInfo buf, XLogReaderState *record)
 {
@@ -85,7 +102,9 @@ xlog2_desc(StringInfo buf, XLogReaderState *record)
 		xl_checksum_state xlrec;
 
 		memcpy(&xlrec, rec, sizeof(xl_checksum_state));
-		appendStringInfoString(buf, get_checksum_state_string(xlrec.new_checksum_state));
+		appendStringInfo(buf, "%s; origin %s",
+						 get_checksum_state_string(xlrec.new_checksum_state),
+						 get_checksum_origin_string(xlrec.origin));
 	}
 }
 

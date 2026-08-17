@@ -431,6 +431,14 @@ get_control_data(ClusterInfo *cluster)
 			cluster->controldata.date_is_int = strstr(p, "64-bit integers") != NULL;
 			got_date_is_int = true;
 		}
+		else if ((p = strstr(bufin, "Data checksum origin:")) != NULL)
+		{
+			/*
+			 * Must be skipped before the generic "checksum" match below, or
+			 * its non-numeric value would clobber data_checksum_version. The
+			 * origin itself is of no interest here.
+			 */
+		}
 		else if ((p = strstr(bufin, "checksum")) != NULL)
 		{
 			p = strchr(p, ':');

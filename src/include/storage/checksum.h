@@ -32,6 +32,23 @@ typedef enum ChecksumStateType
 } ChecksumStateType;
 
 /*
+ * How the current data checksum state of a node came to be: through a
+ * WAL-logged online transition (including replay of one, and initdb), or
+ * through an offline change with pg_checksums, which is local to one node
+ * and leaves no trace in WAL.  Only pg_checksums sets the offline values;
+ * every online or replay-driven state assignment resets the origin to
+ * "online".  The DataChecksumOrigin is stored in pg_control and in WAL
+ * records, so the values cannot be reordered.  New origins must be added
+ * at the end.
+ */
+typedef enum DataChecksumOrigin
+{
+	PG_DATA_CHECKSUM_ORIGIN_ONLINE = 0,
+	PG_DATA_CHECKSUM_ORIGIN_OFFLINE_ENABLE = 1,
+	PG_DATA_CHECKSUM_ORIGIN_OFFLINE_DISABLE = 2,
+} DataChecksumOrigin;
+
+/*
  * Compute the checksum for a Postgres page.  The page must be aligned on a
  * 4-byte boundary.
  */

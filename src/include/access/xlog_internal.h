@@ -292,6 +292,7 @@ typedef struct xl_restore_point
 typedef struct xl_checksum_state
 {
 	ChecksumStateType new_checksum_state;
+	DataChecksumOrigin origin;	/* origin of new_checksum_state */
 } xl_checksum_state;
 
 /* Overwrite of prior contrecord */
@@ -395,8 +396,9 @@ extern void GetOldestRestartPoint(XLogRecPtr *oldrecptr, TimeLineID *oldtli);
  * Exported so that WAL replay can check XLOG2_CHECKSUMS_SYNC records before
  * publishing any replay progress, see ApplyWalRecord().
  */
-extern void CheckSyncedDataChecksumState(uint32 synced_version, XLogRecPtr lsn,
-										 bool enforce);
+extern void CheckSyncedDataChecksumState(uint32 synced_version,
+										 uint32 synced_origin,
+										 XLogRecPtr lsn, bool enforce);
 
 extern void XLogRecGetBlockRefInfo(XLogReaderState *record, bool pretty,
 								   bool detailed_format, StringInfo buf,

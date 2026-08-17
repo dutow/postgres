@@ -1974,7 +1974,7 @@ ApplyWalRecord(XLogReaderState *xlogreader, XLogRecord *record, TimeLineID *repl
 			*replayTLI == recoveryTargetTLI;
 
 		memcpy(&xlrec, XLogRecGetData(xlogreader), sizeof(xl_checksum_state));
-		CheckSyncedDataChecksumState(xlrec.new_checksum_state,
+		CheckSyncedDataChecksumState(xlrec.new_checksum_state, xlrec.origin,
 									 xlogreader->ReadRecPtr,
 									 enforce);
 	}

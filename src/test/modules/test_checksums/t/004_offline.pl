@@ -15,6 +15,17 @@ use lib $FindBin::RealBin;
 
 use DataChecksums::Utils;
 
+# Check the data checksum origin recorded in pg_control
+sub test_checksum_origin
+{
+	my ($node, $expected, $test_name) = @_;
+	my ($stdout, $stderr) = run_command([ 'pg_controldata', $node->data_dir ]);
+	like(
+		$stdout,
+		qr/^Data checksum origin:\s+\Q$expected\E$/m,
+		$test_name);
+}
+
 # Initialize node with checksums disabled.
 my $node = PostgreSQL::Test::Cluster->new('offline_node');
 $node->init(no_data_checksums => 1);
@@ -24,12 +35,15 @@ $node->start;
 $node->safe_psql('postgres',
 	"CREATE TABLE t AS SELECT generate_series(1,10000) AS a;");
 
-# Ensure that checksums are disabled
+# Ensure that checksums are disabled, with an initdb (online) origin
 test_checksum_state($node, 'off');
+$node->stop;
+test_checksum_origin($node, 'online', 'origin is online after initdb');
 
 # Enable checksums offline using pg_checksums
-$node->stop;
 $node->checksum_enable_offline;
+test_checksum_origin($node, 'offline-enable',
+	'origin is offline-enable after offline enable');
 $node->start;
 
 # Ensure that checksums are enabled
@@ -43,6 +57,8 @@ is($result, '9999', 'ensure checksummed pages can be read back');
 # Disable checksums offline again using pg_checksums
 $node->stop;
 $node->checksum_disable_offline;
+test_checksum_origin($node, 'offline-disable',
+	'origin is offline-disable after offline disable');
 $node->start;
 
 # Ensure that checksums are disabled
@@ -72,6 +88,8 @@ enable_data_checksums($node, wait => 'inprogress-on');
 $node->stop('fast');
 $bsession->quit;
 $node->checksum_enable_offline;
+test_checksum_origin($node, 'offline-enable',
+	'origin is offline-enable after offline enable during inprogress-on');
 $node->start;
 
 # Ensure that checksums are now enabled even though processing wasn't
@@ -82,5 +100,12 @@ test_checksum_state($node, 'on');
 $result = $node->safe_psql('postgres', "SELECT count(*) FROM t WHERE a > 1");
 is($result, '9999', 'ensure checksummed pages can be read back');
 
+# The last state change was made offline, so the origin still reflects that.
+# A completed online transition must reset it to online.
+disable_data_checksums($node, wait => 'off');
+test_checksum_state($node, 'off');
+
 $node->stop;
+test_checksum_origin($node, 'online',
+	'origin is online after online transition');
 done_testing();

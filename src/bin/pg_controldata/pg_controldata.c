@@ -84,6 +84,21 @@ wal_level_str(WalLevel wal_level)
 	return _("unrecognized \"wal_level\"");
 }
 
+static const char *
+checksum_origin_str(uint32 origin)
+{
+	switch (origin)
+	{
+		case PG_DATA_CHECKSUM_ORIGIN_ONLINE:
+			return "online";
+		case PG_DATA_CHECKSUM_ORIGIN_OFFLINE_ENABLE:
+			return "offline-enable";
+		case PG_DATA_CHECKSUM_ORIGIN_OFFLINE_DISABLE:
+			return "offline-disable";
+	}
+	return _("unrecognized data checksum origin");
+}
+
 
 int
 main(int argc, char *argv[])
@@ -349,6 +364,8 @@ main(int argc, char *argv[])
 		   (ControlFile->float8ByVal ? _("by value") : _("by reference")));
 	printf(_("Data page checksum version:           %u\n"),
 		   ControlFile->data_checksum_version);
+	printf(_("Data checksum origin:                 %s\n"),
+		   checksum_origin_str(ControlFile->data_checksum_origin));
 	printf(_("Default char data signedness:         %s\n"),
 		   (ControlFile->default_char_signedness ? _("signed") : _("unsigned")));
 	printf(_("Mock authentication nonce:            %s\n"),

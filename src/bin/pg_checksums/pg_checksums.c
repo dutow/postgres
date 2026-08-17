@@ -660,6 +660,9 @@ main(int argc, char *argv[])
 	{
 		ControlFile->data_checksum_version =
 			(mode == PG_MODE_ENABLE) ? PG_DATA_CHECKSUM_VERSION : PG_DATA_CHECKSUM_OFF;
+		ControlFile->data_checksum_origin =
+			(mode == PG_MODE_ENABLE) ? PG_DATA_CHECKSUM_ORIGIN_OFFLINE_ENABLE :
+			PG_DATA_CHECKSUM_ORIGIN_OFFLINE_DISABLE;
 
 		if (do_sync)
 		{
