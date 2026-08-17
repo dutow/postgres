@@ -125,6 +125,7 @@ identifier		{ident_start}{ident_cont}*
 
 BASE_BACKUP			{ return K_BASE_BACKUP; }
 IDENTIFY_SYSTEM		{ return K_IDENTIFY_SYSTEM; }
+DATA_CHECKSUM_STATE	{ return K_DATA_CHECKSUM_STATE; }
 READ_REPLICATION_SLOT	{ return K_READ_REPLICATION_SLOT; }
 SHOW		{ return K_SHOW; }
 TIMELINE			{ return K_TIMELINE; }
@@ -308,6 +309,7 @@ replication_scanner_is_replication_command(yyscan_t yyscanner)
 	switch (first_token)
 	{
 		case K_IDENTIFY_SYSTEM:
+		case K_DATA_CHECKSUM_STATE:
 		case K_BASE_BACKUP:
 		case K_START_REPLICATION:
 		case K_CREATE_REPLICATION_SLOT:

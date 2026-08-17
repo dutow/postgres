@@ -636,6 +636,7 @@ DSMRegistryEntry
 DWORD
 DWORD64
 DataChecksumOrigin
+DataChecksumStateCmd
 DataChecksumsStateStruct
 DataChecksumsWorkerDatabase
 DataChecksumsWorkerOperation

@@ -35,6 +35,16 @@ typedef struct IdentifySystemCmd
 
 
 /* ----------------------
+ *		DATA_CHECKSUM_STATE command
+ * ----------------------
+ */
+typedef struct DataChecksumStateCmd
+{
+	NodeTag		type;
+} DataChecksumStateCmd;
+
+
+/* ----------------------
  *		BASE_BACKUP command
  * ----------------------
  */

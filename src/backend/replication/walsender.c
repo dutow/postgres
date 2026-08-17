@@ -292,6 +292,7 @@ static void XLogSendLogical(void);
 pg_noreturn static void WalSndDoneImmediate(void);
 static void WalSndDone(WalSndSendDataCallback send_data);
 static void IdentifySystem(void);
+static void DataChecksumState(void);
 static void UploadManifest(void);
 static bool HandleUploadManifestPacket(StringInfo buf, off_t *offset,
 									   IncrementalBackupInfo *ib);
@@ -499,6 +500,72 @@ IdentifySystem(void)
 		values[3] = CStringGetTextDatum(dbname);
 	else
 		nulls[3] = true;
+
+	/* send it to dest */
+	do_tup_output(tstate, values, nulls);
+
+	end_tup_output(tstate);
+}
+
+/*
+ * Handle the DATA_CHECKSUM_STATE command.
+ */
+static void
+DataChecksumState(void)
+{
+	DestReceiver *dest;
+	TupOutputState *tstate;
+	TupleDesc	tupdesc;
+	Datum		values[3];
+	bool		nulls[3] = {0};
+	uint32		version;
+	uint32		origin;
+	XLogRecPtr	fence;
+	char		fencestr[MAXFNAMELEN];
+
+	/*
+	 * Sample the state before the fence position, so that any WAL-logged
+	 * transition explaining the reported state lies at or before the fence.
+	 * On a primary the insert position is used, which is trivially at or
+	 * after any inserted record, without depending on flush or publish
+	 * ordering.  On a standby the current replay position is used, which
+	 * includes a record currently being applied, so a state published
+	 * mid-redo is covered.  One residual window remains: during
+	 * end-of-recovery online-transition cleanup a promoting node inserts
+	 * records while still reporting recovery, so the replay-based fence can
+	 * miss them; the window is tiny, and a consumer connecting then simply
+	 * waits until its next reconnect, where the next sample keeps the
+	 * conservative direction.
+	 */
+	GetDataChecksumVersionAndOrigin(&version, &origin);
+
+	am_cascading_walsender = RecoveryInProgress();
+	if (am_cascading_walsender)
+		fence = GetCurrentReplayRecPtr(NULL);
+	else
+		fence = GetXLogInsertRecPtr();
+
+	snprintf(fencestr, sizeof(fencestr), "%X/%08X", LSN_FORMAT_ARGS(fence));
+
+	dest = CreateDestReceiver(DestRemoteSimple);
+
+	/* need a tuple descriptor representing three columns */
+	tupdesc = CreateTemplateTupleDesc(3);
+	/* the values are unsigned, so int4 is not wide enough */
+	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 1,
+							  "data_checksum_version", INT8OID, -1, 0);
+	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 2,
+							  "data_checksum_origin", INT8OID, -1, 0);
+	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 3,
+							  "fence_lsn", TEXTOID, -1, 0);
+	TupleDescFinalize(tupdesc);
+
+	/* prepare for projection of tuples */
+	tstate = begin_tup_output_tupdesc(dest, tupdesc, &TTSOpsVirtual);
+
+	values[0] = Int64GetDatum((int64) version);
+	values[1] = Int64GetDatum((int64) origin);
+	values[2] = CStringGetTextDatum(fencestr);
 
 	/* send it to dest */
 	do_tup_output(tstate, values, nulls);
@@ -2240,6 +2307,13 @@ exec_replication_command(const char *cmd_string)
 			cmdtag = "IDENTIFY_SYSTEM";
 			set_ps_display(cmdtag);
 			IdentifySystem();
+			EndReplicationCommand(cmdtag);
+			break;
+
+		case T_DataChecksumStateCmd:
+			cmdtag = "DATA_CHECKSUM_STATE";
+			set_ps_display(cmdtag);
+			DataChecksumState();
 			EndReplicationCommand(cmdtag);
 			break;
 

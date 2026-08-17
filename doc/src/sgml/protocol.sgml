@@ -2283,6 +2283,61 @@ psql "dbname=postgres replication=database" -c "IDENTIFY_SYSTEM;"
      </listitem>
     </varlistentry>
 
+    <varlistentry id="protocol-replication-data-checksum-state">
+     <term><literal>DATA_CHECKSUM_STATE</literal>
+      <indexterm><primary>DATA_CHECKSUM_STATE</primary></indexterm>
+     </term>
+     <listitem>
+      <para>
+       Requests the server to report its data checksum state. This is
+       intended for standbys cross-checking their own state against their
+       upstream. Server replies with a result set of a single row,
+       containing three fields:
+      </para>
+
+      <variablelist>
+       <varlistentry>
+        <term><literal>data_checksum_version</literal> (<type>int8</type>)</term>
+        <listitem>
+         <para>
+          The raw data checksum version as stored in the control file:
+          <literal>0</literal> if data checksums are disabled,
+          <literal>1</literal> if enabled, <literal>2</literal> if they are
+          being disabled, and <literal>3</literal> if they are being
+          enabled.
+         </para>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry>
+        <term><literal>data_checksum_origin</literal> (<type>int8</type>)</term>
+        <listitem>
+         <para>
+          How the current state was set: <literal>0</literal> if it was set
+          online, <literal>1</literal> if data checksums were enabled
+          offline by <application>pg_checksums</application>, and
+          <literal>2</literal> if they were disabled offline.
+         </para>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry>
+        <term><literal>fence_lsn</literal> (<type>text</type>)</term>
+        <listitem>
+         <para>
+          A WAL position such that any WAL-logged data checksum state
+          transition explaining the reported state lies at or before it.
+          A standby that has replayed to this position and still disagrees
+          with the reported state has genuinely diverged.  The format is
+          the same as the <literal>xlogpos</literal> field of
+          <literal>IDENTIFY_SYSTEM</literal>.
+         </para>
+        </listitem>
+       </varlistentry>
+      </variablelist>
+     </listitem>
+    </varlistentry>
+
     <varlistentry id="protocol-replication-show">
      <term><literal>SHOW</literal> <replaceable class="parameter">name</replaceable>
       <indexterm><primary>SHOW</primary></indexterm>
