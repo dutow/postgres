@@ -41,6 +41,7 @@ tests += {
       't/015_restartpoint_window.pl',
       't/016_archive_standby.pl',
       't/017_pitr_divergence.pl',
+      't/018_cascade.pl',
     ],
   },
 }

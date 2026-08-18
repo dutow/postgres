@@ -289,7 +289,16 @@
     does not need to wait for such a record: it also learns the state of
     its upstream server whenever the WAL receiver connects, and shuts
     down in the same way once no WAL that could reconcile a difference
-    remains in transit.
+    remains in transit.  Whether any such WAL can exist depends on how
+    the upstream's state was set: a state set with
+    <application>pg_checksums</application> never appears in WAL, so the
+    standby shuts down as soon as it sees the difference, while a state
+    last changed online may still have its transition in transit, and
+    the standby keeps replaying until it has passed the position its
+    upstream reported at connect.  The comparison is made against the
+    direct upstream, so an offline change on a cascading standby, which
+    is invisible in the WAL it forwards, is still detected by the
+    standbys directly attached to it.
    </para>
 
   </sect2>

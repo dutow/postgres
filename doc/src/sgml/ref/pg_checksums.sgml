@@ -250,10 +250,15 @@ PostgreSQL documentation
    <application>pg_checksums</application> on each of them, and only then
    restart them.
    If the change is applied inconsistently, each node keeps its own
-   state; when a changed node is started it records its new state in the
-   WAL, and a standby that replays such a record from the timeline it is
-   following while in a different state shuts down cleanly
-   rather than continue in an unsupported configuration.  It can be restarted after converging it with
+   state, and a standby in a different state shuts down cleanly rather
+   than continue in an unsupported configuration.  A standby with a
+   replication connection detects the difference against its upstream
+   server when its WAL receiver connects and no WAL that could
+   reconcile the difference remains in transit.  A standby fed only
+   from a WAL archive detects the difference when it replays the state
+   a changed node records in the WAL at that node's startup, on the
+   timeline the standby is following.
+   A stopped standby can be restarted after converging it with
    <application>pg_checksums</application> or recreating it from a base
    backup.  A server performing any other archive recovery (such as a
    targeted point-in-time recovery), a standby whose promotion has been

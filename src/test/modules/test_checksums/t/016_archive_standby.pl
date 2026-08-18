@@ -2,7 +2,11 @@
 
 # Offline checksum divergence enforcement for archive-fed standbys.
 # Without a replication connection the sync record travels through the
-# archive, and is the only mechanism that stops a diverged standby.
+# archive, and is the only mechanism that stops a diverged standby
+# (scenarios 1 and 2).  Once the standby also has a connection, the
+# state sampled at connect takes over where the archive leaves off
+# (scenario 3).  A promotion drains a sync record still sitting in
+# pg_wal warn-only instead of shutting down (scenario 4).
 use strict;
 use warnings FATAL => 'all';
 
@@ -126,9 +130,83 @@ command_ok([ 'pg_checksums', '--enable', '-D', $standby->data_dir ],
 $standby->start;
 archive_catchup();
 test_checksum_state($standby, 'on');
+
+# Scenario 3: archive catch-up followed by streaming.  A diverged
+# standby that first works through a backlog of archived WAL is
+# tolerated for as long as the backlog holds no sync record, and is
+# only judged once the walreceiver connects.  Move the primary to an
+# online-origin "on" first, so that it is the fence rule of the
+# connection check, and not the immediate offline-origin shutdown,
+# that fires at the seam; the standby follows the online transitions
+# through the archive.
+disable_data_checksums($primary, wait => 'off');
+enable_data_checksums($primary, wait => 'on');
+archive_catchup();
+test_checksum_state($standby, 'on');
+
+# The primary restart moves the standby's restartpoint horizon past
+# the transition records, so that pg_checksums accepts its control
+# file, and writes a sync record the standby replays while the states
+# still match; its re-replay below the consistency point after the
+# standby's own restart below is tolerated (cf. 010_offline_standby.pl
+# scenario 5).
+$primary->restart;
+archive_catchup();
+
+# Disable offline on the standby only, and put WAL in transit that the
+# restarted standby fetches from the archive first.  None of it is a
+# sync record, so the record layer stays warn-only while the archive
+# is drained.  The second update lands after the segment switch and is
+# only available over the connection; replaying it carries the standby
+# past the fence right away, instead of stalling on background WAL.
+$standby->stop;
+$standby->checksum_disable_offline;
+$primary->safe_psql('postgres', "UPDATE t SET a = a WHERE a = 1;");
+$primary->safe_psql('postgres', "SELECT pg_switch_wal()");
+$primary->safe_psql('postgres', "UPDATE t SET a = a WHERE a = 2;");
+
+# Adding primary_conninfo makes the standby stream once the archive is
+# exhausted.  At connect the walreceiver samples the primary's
+# online-origin "on"; the fence sampled with it lies right past the
+# WAL the standby just restored, so replay passes it promptly and the
+# remaining difference shuts the standby down.
+$standby->append_conf('postgresql.conf',
+	"primary_conninfo = '" . $primary->connstr . "'");
+$logstart = -s $standby->logfile;
+start_maybe_self_shutdown($standby);
+$standby->wait_for_log(
+	qr/does not match the state "on" of its upstream server/, $logstart);
+$standby->wait_for_log(
+	qr/no WAL remains in transit that could reconcile the states/,
+	$logstart);
+wait_for_self_shutdown($standby);
+
+# The shutdown came from the connection check after the archive ran
+# dry, not from a record.  The walreceiver may not have gotten around
+# to logging its streaming start before the shutdown, so anchor the
+# ordering on the mismatch message the startup process logs itself.
+my $log = PostgreSQL::Test::Utils::slurp_file($standby->logfile, $logstart);
+like(
+	$log,
+	# any restore before the mismatch suffices
+	qr/restored log file .* from archive.*does not match the state "on" of its upstream server/s,
+	'archive was drained before the divergence was judged');
+unlike(
+	$log,
+	qr/of the node that wrote the WAL/,
+	'standby was stopped by the connection check, not a sync record');
+
+# Converge the standby and rejoin, now over both transports.
+command_ok([ 'pg_checksums', '--enable', '-D', $standby->data_dir ],
+	'pg_checksums converges the archive standby at the seam');
+$standby->start;
+archive_catchup();
+test_checksum_state($standby, 'on');
+is( $standby->safe_psql('postgres', "SELECT count(*) FROM t;"),
+	'1001', 'standby readable after converging at the seam');
 $standby->stop;
 
-# Scenario 3: a promotion triggered while a mismatched sync record is
+# Scenario 4: a promotion triggered while a mismatched sync record is
 # present in the standby's pg_wal but not yet replayed.  The drain
 # before promoting replays the record with the promotion already
 # triggered, so it must warn and promote instead of shutting down.
@@ -181,7 +259,7 @@ $standby2->promote;
 $standby2->poll_query_until('postgres', "SELECT NOT pg_is_in_recovery()")
   or die "standby did not promote";
 
-my $log = PostgreSQL::Test::Utils::slurp_file($standby2->logfile, $logstart);
+$log = PostgreSQL::Test::Utils::slurp_file($standby2->logfile, $logstart);
 like(
 	$log,
 	qr/WARNING:.*does not match the state "off" of the node that wrote the WAL/,
