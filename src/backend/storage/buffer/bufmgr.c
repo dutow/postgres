@@ -4966,8 +4966,23 @@ DropRelationsAllBuffers(SMgrRelation *smgr_reln, int nlocators)
 			{
 				if (!smgrexists(rels[i], j))
 					continue;
-				cached = false;
-				break;
+
+				/*
+				 * In recovery, a fork created by WAL replay but never
+				 * accessed afterwards has no cached size.  The startup
+				 * process is the only process extending relations during
+				 * recovery, so establishing the cached size with an
+				 * lseek(SEEK_END) now is as trustworthy as the first-lseek
+				 * scheme described in DropRelationBuffers: there cannot be
+				 * any buffers beyond the size it returns.
+				 */
+				if (InRecovery)
+					block[i][j] = smgrnblocks(rels[i], j);
+				else
+				{
+					cached = false;
+					break;
+				}
 			}
 
 			/* calculate the total number of blocks to be invalidated */
