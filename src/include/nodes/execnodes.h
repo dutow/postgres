@@ -465,6 +465,9 @@ typedef struct MergeActionState
 	ProjectionInfo *mas_proj;	/* projection of the action's targetlist for
 								 * this rel */
 	ExprState  *mas_whenqual;	/* WHEN [NOT] MATCHED AND conditions */
+	Bitmapset  *mas_providedCols;	/* columns this action assigns, in the
+									 * target relation's numbering; see
+									 * ExecGetProvidedCols */
 } MergeActionState;
 
 /*
@@ -735,6 +738,16 @@ typedef struct EState
 
 	/* Stuff used for firing triggers: */
 	List	   *es_trig_target_relations;	/* trigger-only ResultRelInfos */
+
+	/*
+	 * Columns of the tuple currently being checked against constraints whose
+	 * values the user supplied, in the numbering of the query's target
+	 * relation.  Only used to decide what a constraint violation is allowed
+	 * to print; see ExecGetProvidedCols.  The "valid" flag distinguishes an
+	 * empty set from callers that never set this.
+	 */
+	Bitmapset  *es_providedCols;
+	bool		es_providedColsValid;
 
 	/* Parameter info: */
 	ParamListInfo es_param_list_info;	/* values of external params */

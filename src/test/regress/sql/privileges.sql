@@ -791,6 +791,56 @@ UPDATE errtst SET a = 'aaaa', b = NULL WHERE a = 'aaa';
 SET SESSION AUTHORIZATION regress_priv_user1;
 DROP TABLE errtst;
 
+-- The "columns the user provided" exemption must only cover columns whose
+-- value in the failing row really came from the user, not every column named
+-- anywhere in the statement.
+CREATE TABLE errtst(a int PRIMARY KEY, b int CHECK (b < 10), secret text);
+GRANT SELECT (a) ON TABLE errtst TO regress_priv_user2;
+GRANT INSERT (a, secret) ON TABLE errtst TO regress_priv_user2;
+GRANT UPDATE (b, secret) ON TABLE errtst TO regress_priv_user2;
+
+INSERT INTO errtst VALUES (1, 1, 'top secret');
+
+SET SESSION AUTHORIZATION regress_priv_user2;
+
+-- the plain spelling of the update; secret is not shown
+UPDATE errtst SET b = 10;
+-- ON CONFLICT DO UPDATE keeps the stored value of columns not in SET
+INSERT INTO errtst (a, secret) VALUES (1, 'mine')
+  ON CONFLICT (a) DO UPDATE SET b = 10;
+-- an INSERT action's column list must not exempt columns of a row an UPDATE
+-- action produced, even though the INSERT action never runs
+MERGE INTO errtst USING (VALUES (1)) v(a) ON errtst.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 10
+  WHEN NOT MATCHED THEN INSERT (a, secret) VALUES (v.a, 'mine');
+-- nor may one UPDATE action's SET list exempt columns of another's row
+MERGE INTO errtst USING (VALUES (1)) v(a) ON errtst.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 10
+  WHEN NOT MATCHED BY SOURCE THEN UPDATE SET secret = 'mine';
+-- but the running action's own columns stay visible
+MERGE INTO errtst USING (VALUES (1)) v(a) ON errtst.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 10, secret = 'mine';
+
+SET SESSION AUTHORIZATION regress_priv_user1;
+DROP TABLE errtst;
+
+-- Same, for the leftovers of a FOR PORTION OF update: they carry the *old*
+-- value of the columns the user overwrote.
+CREATE TABLE errtst(a int4range, valid_at tsrange, secret text,
+  CONSTRAINT errtst_pk PRIMARY KEY (a, valid_at WITHOUT OVERLAPS),
+  CONSTRAINT errtst_len CHECK (upper(valid_at) - lower(valid_at) > '400 days'::interval));
+GRANT SELECT (a, valid_at) ON TABLE errtst TO regress_priv_user2;
+GRANT UPDATE (valid_at, secret) ON TABLE errtst TO regress_priv_user2;
+
+INSERT INTO errtst VALUES ('[1,2)', '[2020-01-01,2030-01-01)', 'top secret');
+
+SET SESSION AUTHORIZATION regress_priv_user2;
+UPDATE errtst FOR PORTION OF valid_at FROM '2021-01-01' TO '2029-06-01'
+   SET secret = 'mine';
+
+SET SESSION AUTHORIZATION regress_priv_user1;
+DROP TABLE errtst;
+
 -- test column-level privileges on the range used in FOR PORTION OF
 SET SESSION AUTHORIZATION regress_priv_user1;
 CREATE TABLE t1 (

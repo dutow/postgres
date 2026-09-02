@@ -1616,6 +1616,9 @@ ExecForPortionOfLeftovers(ModifyTableContext *context,
 		AfterTriggerBeginQuery();
 		ExecSetupTransitionCaptureState(mtstate, estate);
 		fireBSTriggers(mtstate);
+
+		/* the leftover is the stored row, nothing in it came from the user */
+		ExecSetProvidedCols(estate, NULL);
 		ExecInsert(context, resultRelInfo, leftoverSlot, false, NULL, NULL);
 		fireASTriggers(mtstate);
 		AfterTriggerEndQuery(estate);
@@ -1661,6 +1664,13 @@ ExecBatchInsert(ModifyTableState *mtstate,
 																  slots,
 																  planSlots,
 																  &numInserted);
+
+	/*
+	 * These tuples were built before others of this query were, so whatever
+	 * ExecSetProvidedCols last recorded need not describe them; see
+	 * ExecGetProvidedCols.
+	 */
+	ExecClearProvidedCols(estate);
 
 	for (i = 0; i < numInserted; i++)
 	{
@@ -3234,8 +3244,14 @@ ExecOnConflictUpdate(ModifyTableContext *context,
 							 mtstate->ps.state);
 	}
 
-	/* Project the new tuple version */
+	/*
+	 * Project the new tuple version.  Only the SET list came from the user;
+	 * every other column keeps the value found in the table.
+	 */
 	ExecProject(resultRelInfo->ri_onConflict->oc_ProjInfo);
+	ExecSetProvidedCols(mtstate->ps.state,
+						ExecGetUpdatedCols(mtstate->rootResultRelInfo,
+										   mtstate->ps.state));
 
 	/*
 	 * Note that it is possible that the target tuple has been modified in
@@ -3667,6 +3683,7 @@ lmerge_matched:
 				 * UPDATE action's targetlist doesn't have any.
 				 */
 				newslot = ExecProject(relaction->mas_proj);
+				ExecSetProvidedCols(estate, relaction->mas_providedCols);
 
 				mtstate->mt_merge_action = relaction;
 				if (!ExecUpdatePrologue(context, resultRelInfo,
@@ -4135,6 +4152,9 @@ ExecMergeNotMatched(ModifyTableContext *context, ResultRelInfo *resultRelInfo,
 				 */
 				newslot = ExecProject(action->mas_proj);
 				mtstate->mt_merge_action = action;
+				ExecSetProvidedCols(mtstate->ps.state,
+									ExecGetInsertedCols(mtstate->rootResultRelInfo,
+														mtstate->ps.state));
 
 				rslot = ExecInsert(context, mtstate->rootResultRelInfo,
 								   newslot, canSetTag, NULL, NULL);
@@ -4311,6 +4331,9 @@ ExecInitMerge(ModifyTableState *mtstate, EState *estate)
 												  econtext,
 												  resultRelInfo->ri_newTupleSlot,
 												  &mtstate->ps);
+					action_state->mas_providedCols =
+						ExecProvidedColsFromColnos(resultRelInfo, estate,
+												   action->updateColnos);
 					mtstate->mt_merge_subcommands |= MERGE_UPDATE;
 					break;
 				case CMD_DELETE:
@@ -4977,6 +5000,9 @@ ExecModifyTable(PlanState *pstate)
 				if (unlikely(!resultRelInfo->ri_projectNewInfoValid))
 					ExecInitInsertProjection(node, resultRelInfo);
 				slot = ExecGetInsertNewTuple(resultRelInfo, context.planSlot);
+				ExecSetProvidedCols(estate,
+									ExecGetInsertedCols(node->rootResultRelInfo,
+														estate));
 				slot = ExecInsert(&context, resultRelInfo, slot,
 								  node->canSetTag, NULL, NULL);
 				break;
@@ -5016,6 +5042,9 @@ ExecModifyTable(PlanState *pstate)
 				}
 				slot = ExecGetUpdateNewTuple(resultRelInfo, context.planSlot,
 											 oldSlot);
+				ExecSetProvidedCols(estate,
+									ExecGetUpdatedCols(node->rootResultRelInfo,
+													   estate));
 
 				/* Now apply the update. */
 				slot = ExecUpdate(&context, resultRelInfo, tupleid, oldtuple,

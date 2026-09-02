@@ -134,6 +134,9 @@ CreateExecutorState(void)
 	estate->es_tuple_routing_result_relations = NIL;
 	estate->es_trig_target_relations = NIL;
 
+	estate->es_providedCols = NULL;
+	estate->es_providedColsValid = false;
+
 	estate->es_insert_pending_result_relations = NIL;
 	estate->es_insert_pending_modifytables = NIL;
 
@@ -1421,6 +1424,93 @@ ExecGetUpdatedCols(ResultRelInfo *relinfo, EState *estate)
 	}
 
 	return perminfo->updatedCols;
+}
+
+/*
+ * Record which columns of the tuple about to be checked against constraints
+ * got their values from the user.  See ExecGetProvidedCols.
+ */
+void
+ExecSetProvidedCols(EState *estate, Bitmapset *cols)
+{
+	estate->es_providedCols = cols;
+	estate->es_providedColsValid = true;
+}
+
+/*
+ * Forget what ExecSetProvidedCols recorded
+ *
+ * For use where a tuple is checked long enough after it was built that the
+ * recorded set may describe some other tuple by then.  The statement-wide
+ * answer is used instead, as for callers that never record anything.
+ */
+void
+ExecClearProvidedCols(EState *estate)
+{
+	estate->es_providedCols = NULL;
+	estate->es_providedColsValid = false;
+}
+
+/*
+ * Return the columns of the tuple being checked that the user provided
+ *
+ * A constraint violation may print such a column even without SELECT rights
+ * on it, so this must describe the tuple at hand and not the statement: the
+ * statement-wide insertedCols/updatedCols say nothing about which of those
+ * columns the running operation actually assigned, and the rest of the tuple
+ * can well be stored data the user may not read.  ModifyTable therefore
+ * records the set per tuple.  Callers that never do (COPY, apply workers,
+ * extensions) get the statement-wide answer, which is accurate for them.
+ *
+ * 'relinfo' must be the relation the caller reports the tuple against, that
+ * is, the query's target relation rather than a routed-to partition.
+ */
+Bitmapset *
+ExecGetProvidedCols(ResultRelInfo *relinfo, EState *estate)
+{
+	if (estate->es_providedColsValid)
+		return estate->es_providedCols;
+
+	return bms_union(ExecGetInsertedCols(relinfo, estate),
+					 ExecGetUpdatedCols(relinfo, estate));
+}
+
+/*
+ * Translate a list of attribute numbers of 'relinfo' into a provided-columns
+ * bitmap in the query target relation's numbering
+ *
+ * Used for the assignment lists of MERGE actions, which the planner has
+ * already converted to the result relation's numbering.
+ */
+Bitmapset *
+ExecProvidedColsFromColnos(ResultRelInfo *relinfo, EState *estate,
+						   List *colnos)
+{
+	TupleConversionMap *map = NULL;
+	Bitmapset  *result = NULL;
+	ListCell   *lc;
+
+	if (relinfo->ri_RootResultRelInfo)
+		map = ExecGetRootToChildMap(relinfo, estate);
+
+	foreach(lc, colnos)
+	{
+		AttrNumber	attno = lfirst_int(lc);
+
+		if (map)
+		{
+			/* the map is indexed by this relation's attribute numbers */
+			Assert(attno > 0 && attno <= map->attrMap->maplen);
+			attno = map->attrMap->attnums[attno - 1];
+			if (attno == 0)
+				continue;		/* no counterpart in the target relation */
+		}
+
+		result = bms_add_member(result,
+								attno - FirstLowInvalidHeapAttributeNumber);
+	}
+
+	return result;
 }
 
 /* Return a bitmap representing generated columns being updated */

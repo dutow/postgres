@@ -1143,6 +1143,9 @@ ExecInitPartitionInfo(ModifyTableState *mtstate, EState *estate,
 												  econtext,
 												  leaf_part_rri->ri_newTupleSlot,
 												  NULL);
+					action_state->mas_providedCols =
+						ExecProvidedColsFromColnos(leaf_part_rri, estate,
+												   action->updateColnos);
 					break;
 				case CMD_DELETE:
 				case CMD_NOTHING:

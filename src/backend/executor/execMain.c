@@ -2010,15 +2010,13 @@ ExecPartitionCheckEmitError(ResultRelInfo *resultRelInfo,
 		if (map != NULL)
 			slot = execute_attr_map_slot(map, slot,
 										 MakeTupleTableSlot(tupdesc, &TTSOpsVirtual, 0));
-		modifiedCols = bms_union(ExecGetInsertedCols(rootrel, estate),
-								 ExecGetUpdatedCols(rootrel, estate));
+		modifiedCols = ExecGetProvidedCols(rootrel, estate);
 	}
 	else
 	{
 		root_relid = RelationGetRelid(resultRelInfo->ri_RelationDesc);
 		tupdesc = RelationGetDescr(resultRelInfo->ri_RelationDesc);
-		modifiedCols = bms_union(ExecGetInsertedCols(resultRelInfo, estate),
-								 ExecGetUpdatedCols(resultRelInfo, estate));
+		modifiedCols = ExecGetProvidedCols(resultRelInfo, estate);
 	}
 
 	val_desc = ExecBuildSlotValueDescription(root_relid,
@@ -2126,13 +2124,11 @@ ExecConstraints(ResultRelInfo *resultRelInfo,
 				if (map != NULL)
 					slot = execute_attr_map_slot(map, slot,
 												 MakeTupleTableSlot(tupdesc, &TTSOpsVirtual, 0));
-				modifiedCols = bms_union(ExecGetInsertedCols(rootrel, estate),
-										 ExecGetUpdatedCols(rootrel, estate));
+				modifiedCols = ExecGetProvidedCols(rootrel, estate);
 				rel = rootrel->ri_RelationDesc;
 			}
 			else
-				modifiedCols = bms_union(ExecGetInsertedCols(resultRelInfo, estate),
-										 ExecGetUpdatedCols(resultRelInfo, estate));
+				modifiedCols = ExecGetProvidedCols(resultRelInfo, estate);
 			val_desc = ExecBuildSlotValueDescription(RelationGetRelid(rel),
 													 slot,
 													 tupdesc,
@@ -2262,13 +2258,11 @@ ReportNotNullViolationError(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
 		if (map != NULL)
 			slot = execute_attr_map_slot(map, slot,
 										 MakeTupleTableSlot(tupdesc, &TTSOpsVirtual, 0));
-		modifiedCols = bms_union(ExecGetInsertedCols(rootrel, estate),
-								 ExecGetUpdatedCols(rootrel, estate));
+		modifiedCols = ExecGetProvidedCols(rootrel, estate);
 		rel = rootrel->ri_RelationDesc;
 	}
 	else
-		modifiedCols = bms_union(ExecGetInsertedCols(resultRelInfo, estate),
-								 ExecGetUpdatedCols(resultRelInfo, estate));
+		modifiedCols = ExecGetProvidedCols(resultRelInfo, estate);
 
 	val_desc = ExecBuildSlotValueDescription(RelationGetRelid(rel),
 											 slot,
@@ -2371,13 +2365,11 @@ ExecWithCheckOptions(WCOKind kind, ResultRelInfo *resultRelInfo,
 							slot = execute_attr_map_slot(map, slot,
 														 MakeTupleTableSlot(tupdesc, &TTSOpsVirtual, 0));
 
-						modifiedCols = bms_union(ExecGetInsertedCols(rootrel, estate),
-												 ExecGetUpdatedCols(rootrel, estate));
+						modifiedCols = ExecGetProvidedCols(rootrel, estate);
 						rel = rootrel->ri_RelationDesc;
 					}
 					else
-						modifiedCols = bms_union(ExecGetInsertedCols(resultRelInfo, estate),
-												 ExecGetUpdatedCols(resultRelInfo, estate));
+						modifiedCols = ExecGetProvidedCols(resultRelInfo, estate);
 					val_desc = ExecBuildSlotValueDescription(RelationGetRelid(rel),
 															 slot,
 															 tupdesc,
@@ -2488,8 +2480,8 @@ ExecBuildSlotValueDescription(Oid reloid,
 	 * Check if the user has permissions to see the row.  Table-level SELECT
 	 * allows access to all columns.  If the user does not have table-level
 	 * SELECT then we check each column and include those the user has SELECT
-	 * rights on.  Additionally, we always include columns the user provided
-	 * data for.
+	 * rights on.  Additionally, we always include the columns of this row
+	 * that the user provided the data for; see ExecGetProvidedCols.
 	 */
 	aclresult = pg_class_aclcheck(reloid, GetUserId(), ACL_SELECT);
 	if (aclresult != ACLCHECK_OK)
