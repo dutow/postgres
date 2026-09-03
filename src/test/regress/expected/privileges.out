@@ -1157,9 +1157,10 @@ DROP TABLE errtst;
 -- The "columns the user provided" exemption must only cover columns whose
 -- value in the failing row really came from the user, not every column named
 -- anywhere in the statement.
-CREATE TABLE errtst(a int PRIMARY KEY, b int CHECK (b < 10), secret text);
+CREATE TABLE errtst(a int PRIMARY KEY, b int CHECK (b < 10),
+  secret text DEFAULT 'top secret');
 GRANT SELECT (a) ON TABLE errtst TO regress_priv_user2;
-GRANT INSERT (a, secret) ON TABLE errtst TO regress_priv_user2;
+GRANT INSERT (a, b, secret) ON TABLE errtst TO regress_priv_user2;
 GRANT UPDATE (b, secret) ON TABLE errtst TO regress_priv_user2;
 INSERT INTO errtst VALUES (1, 1, 'top secret');
 SET SESSION AUTHORIZATION regress_priv_user2;
@@ -1190,6 +1191,13 @@ MERGE INTO errtst USING (VALUES (1)) v(a) ON errtst.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 10, secret = 'mine';
 ERROR:  new row for relation "errtst" violates check constraint "errtst_b_check"
 DETAIL:  Failing row contains (a, b, secret) = (1, 10, mine).
+-- nor may one INSERT action's column list exempt columns of a row another
+-- INSERT action produced
+MERGE INTO errtst USING (VALUES (2)) v(a) ON errtst.a = v.a
+  WHEN NOT MATCHED AND v.a = 0 THEN INSERT (a, b, secret) VALUES (v.a, 1, 'mine')
+  WHEN NOT MATCHED THEN INSERT (a, b) VALUES (v.a, 10);
+ERROR:  new row for relation "errtst" violates check constraint "errtst_b_check"
+DETAIL:  Failing row contains (a, b) = (2, 10).
 SET SESSION AUTHORIZATION regress_priv_user1;
 DROP TABLE errtst;
 -- Same, for the leftovers of a FOR PORTION OF update: they carry the *old*

@@ -2045,6 +2045,8 @@ typedef struct MergeAction
 	List	   *updateColnos pg_node_attr(query_jumble_ignore);
 	/* those of them assigned only in part */
 	Bitmapset  *updateIndirectCols pg_node_attr(query_jumble_ignore);
+	/* target attribute numbers of an INSERT */
+	Bitmapset  *insertedCols pg_node_attr(query_jumble_ignore);
 } MergeAction;
 
 /*

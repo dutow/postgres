@@ -3763,6 +3763,11 @@ rewriteTargetView(Query *parsetree, Relation view)
 						elog(ERROR, "attribute number %d not found in view targetlist",
 							 tle->resno);
 				}
+
+				if (action->commandType == CMD_INSERT)
+					action->insertedCols =
+						adjust_view_column_set(action->insertedCols,
+											   view_targetlist);
 			}
 		}
 	}

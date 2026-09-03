@@ -4151,8 +4151,7 @@ ExecMergeNotMatched(ModifyTableContext *context, ResultRelInfo *resultRelInfo,
 				newslot = ExecProject(action->mas_proj);
 				mtstate->mt_merge_action = action;
 				ExecSetProvidedCols(mtstate->ps.state,
-									ExecGetInsertedCols(mtstate->rootResultRelInfo,
-														mtstate->ps.state));
+									action->mas_providedCols);
 
 				rslot = ExecInsert(context, mtstate->rootResultRelInfo,
 								   newslot, canSetTag, NULL, NULL);
@@ -4317,6 +4316,7 @@ ExecInitMerge(ModifyTableState *mtstate, EState *estate)
 												tgtslot,
 												&mtstate->ps,
 												tgtdesc);
+					action_state->mas_providedCols = action->insertedCols;
 
 					mtstate->mt_merge_subcommands |= MERGE_INSERT;
 					break;

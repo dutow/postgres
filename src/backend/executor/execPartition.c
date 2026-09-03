@@ -1124,6 +1124,7 @@ ExecInitPartitionInfo(ModifyTableState *mtstate, EState *estate,
 												leaf_part_rri->ri_newTupleSlot,
 												&mtstate->ps,
 												RelationGetDescr(partrel));
+					action_state->mas_providedCols = action->insertedCols;
 					break;
 				case CMD_UPDATE:
 

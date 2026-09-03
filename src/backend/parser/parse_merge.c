@@ -372,6 +372,9 @@ transformMergeStmt(ParseState *pstate, MergeStmt *stmt)
 											  false);
 						action->targetList = lappend(action->targetList, tle);
 
+						action->insertedCols =
+							bms_add_member(action->insertedCols,
+										   attr_num - FirstLowInvalidHeapAttributeNumber);
 						perminfo->insertedCols =
 							bms_add_member(perminfo->insertedCols,
 										   attr_num - FirstLowInvalidHeapAttributeNumber);
