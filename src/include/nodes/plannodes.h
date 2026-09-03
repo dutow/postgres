@@ -348,6 +348,8 @@ typedef struct ModifyTable
 	List	   *resultRelations;
 	/* per-target-table update_colnos lists */
 	List	   *updateColnosLists;
+	/* update_colnos assigned only in part, in root's numbering */
+	Bitmapset  *updateIndirectCols;
 	/* per-target-table WCO lists */
 	List	   *withCheckOptionLists;
 	/* alias for OLD in RETURNING lists */
@@ -374,6 +376,8 @@ typedef struct ModifyTable
 	List	   *onConflictSet;
 	/* target column numbers for onConflictSet */
 	List	   *onConflictCols;
+	/* onConflictCols assigned only in part */
+	Bitmapset  *onConflictIndirectCols;
 	/* WHERE for ON CONFLICT DO SELECT/UPDATE */
 	Node	   *onConflictWhere;
 	/* FOR PORTION OF clause for UPDATE/DELETE */

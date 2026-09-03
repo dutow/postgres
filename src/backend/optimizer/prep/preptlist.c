@@ -156,8 +156,13 @@ preprocess_targetlist(PlannerInfo *root)
 															  action->targetList,
 															  target_relation);
 			else if (action->commandType == CMD_UPDATE)
+			{
 				action->updateColnos =
 					extract_update_targetlist_colnos(action->targetList);
+				action->updateIndirectCols =
+					extract_update_targetlist_indirectcols(action->targetList,
+														   action->updateColnos);
+			}
 
 			/*
 			 * Add resjunk entries for any Vars and PlaceHolderVars used in
@@ -362,6 +367,66 @@ extract_update_targetlist_colnos(List *tlist)
 		tle->resno = nextresno++;
 	}
 	return update_colnos;
+}
+
+/*
+ * extract_update_targetlist_indirectcols
+ *		Extract the target-table columns that an UPDATE's targetlist assigns
+ *		to only in part, as a bitmapset offset by
+ *		FirstLowInvalidHeapAttributeNumber.
+ *
+ * An assignment through subscripts or to a field, such as SET a[1] = ... or
+ * SET c.f = ..., builds the new column value out of the old one: the parser
+ * turns it into a SubscriptingRef carrying an assignment expression, or a
+ * FieldStore, possibly under a domain coercion.  All of the new value except
+ * the assigned part then comes from the stored row rather than from the
+ * user, which the executor has to know when it decides what a constraint
+ * violation may print.
+ *
+ * update_colnos must be what extract_update_targetlist_colnos returned for
+ * this tlist; whether that has renumbered the tlist yet does not matter.
+ */
+Bitmapset *
+extract_update_targetlist_indirectcols(List *tlist, List *update_colnos)
+{
+	Bitmapset  *result = NULL;
+	ListCell   *lc;
+	ListCell   *lc_colno = list_head(update_colnos);
+
+	foreach(lc, tlist)
+	{
+		TargetEntry *tle = (TargetEntry *) lfirst(lc);
+		Node	   *expr;
+		AttrNumber	attno;
+
+		if (tle->resjunk)
+			continue;
+
+		Assert(lc_colno != NULL);
+		attno = lfirst_int(lc_colno);
+		lc_colno = lnext(update_colnos, lc_colno);
+
+		/* eval_const_expressions may have relabeled a domain coercion */
+		expr = (Node *) tle->expr;
+		for (;;)
+		{
+			if (IsA(expr, CoerceToDomain))
+				expr = (Node *) ((CoerceToDomain *) expr)->arg;
+			else if (IsA(expr, RelabelType))
+				expr = (Node *) ((RelabelType *) expr)->arg;
+			else
+				break;
+		}
+
+		if (IsA(expr, FieldStore) ||
+			(IsA(expr, SubscriptingRef) &&
+			 ((SubscriptingRef *) expr)->refassgnexpr != NULL))
+			result = bms_add_member(result,
+									attno - FirstLowInvalidHeapAttributeNumber);
+	}
+	Assert(lc_colno == NULL);
+
+	return result;
 }
 
 

@@ -841,6 +841,41 @@ UPDATE errtst FOR PORTION OF valid_at FROM '2021-01-01' TO '2029-06-01'
 SET SESSION AUTHORIZATION regress_priv_user1;
 DROP TABLE errtst;
 
+-- A column assigned only in part, through a subscript or a field, keeps the
+-- stored value everywhere else, so the user did not provide it either.
+CREATE TYPE errtst_pair AS (x int, y text);
+CREATE DOMAIN errtst_arr AS int[];
+CREATE TABLE errtst(id int PRIMARY KEY,
+  arr int[] CHECK (arr[1] < 10),
+  darr errtst_arr CHECK (darr[1] < 10),
+  rec errtst_pair CHECK ((rec).x < 10),
+  js jsonb CHECK ((js->>'x')::int < 10));
+GRANT SELECT (id) ON TABLE errtst TO regress_priv_user2;
+GRANT INSERT (id, arr) ON TABLE errtst TO regress_priv_user2;
+GRANT UPDATE (arr, darr, rec, js) ON TABLE errtst TO regress_priv_user2;
+
+INSERT INTO errtst VALUES (1, '{1,2}', '{1,2}', (1, 'top secret'),
+  '{"x": 1, "y": "top secret"}');
+
+SET SESSION AUTHORIZATION regress_priv_user2;
+
+UPDATE errtst SET arr[1] = 10;
+UPDATE errtst SET darr[1] = 10;
+UPDATE errtst SET rec.x = 10;
+UPDATE errtst SET js['x'] = '10';
+INSERT INTO errtst (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET arr[1] = 10;
+MERGE INTO errtst USING (VALUES (1)) v(id) ON errtst.id = v.id
+  WHEN MATCHED THEN UPDATE SET rec.x = 10;
+-- a column assigned as a whole in the same statement stays visible
+UPDATE errtst SET arr[1] = 10, js = '{"x": 10}';
+-- an INSERT's subscript assignment starts from nothing, so that stays visible
+INSERT INTO errtst (id, arr[1]) VALUES (2, 10);
+
+SET SESSION AUTHORIZATION regress_priv_user1;
+DROP TABLE errtst;
+DROP DOMAIN errtst_arr;
+DROP TYPE errtst_pair;
+
 -- test column-level privileges on the range used in FOR PORTION OF
 SET SESSION AUTHORIZATION regress_priv_user1;
 CREATE TABLE t1 (

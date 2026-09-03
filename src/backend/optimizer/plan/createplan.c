@@ -7134,6 +7134,9 @@ make_modifytable(PlannerInfo *root, Plan *subplan,
 		node->onConflictSet = onconflict->onConflictSet;
 		node->onConflictCols =
 			extract_update_targetlist_colnos(node->onConflictSet);
+		node->onConflictIndirectCols =
+			extract_update_targetlist_indirectcols(node->onConflictSet,
+												   node->onConflictCols);
 		node->onConflictWhere = onconflict->onConflictWhere;
 
 		/*
@@ -7148,6 +7151,10 @@ make_modifytable(PlannerInfo *root, Plan *subplan,
 		node->exclRelTlist = onconflict->exclRelTlist;
 	}
 	node->updateColnosLists = updateColnosLists;
+	if (operation == CMD_UPDATE)
+		node->updateIndirectCols =
+			extract_update_targetlist_indirectcols(root->processed_tlist,
+												   root->update_colnos);
 	node->forPortionOf = (Node *) forPortionOf;
 	node->withCheckOptionLists = withCheckOptionLists;
 	node->returningOldAlias = root->parse->returningOldAlias;

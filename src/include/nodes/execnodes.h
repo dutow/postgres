@@ -1523,6 +1523,13 @@ typedef struct ModifyTableState
 	List	   *mt_mergeActionLists;
 	List	   *mt_mergeJoinConditions;
 	List	   *mt_fdwPrivLists;
+
+	/*
+	 * Columns the user provides in the new tuple of an UPDATE, and of an
+	 * INSERT's ON CONFLICT DO UPDATE; see ExecGetProvidedCols.
+	 */
+	Bitmapset  *mt_updateProvidedCols;
+	Bitmapset  *mt_onConflictProvidedCols;
 } ModifyTableState;
 
 /* ----------------

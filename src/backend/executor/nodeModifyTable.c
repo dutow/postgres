@@ -3249,9 +3249,7 @@ ExecOnConflictUpdate(ModifyTableContext *context,
 	 * every other column keeps the value found in the table.
 	 */
 	ExecProject(resultRelInfo->ri_onConflict->oc_ProjInfo);
-	ExecSetProvidedCols(mtstate->ps.state,
-						ExecGetUpdatedCols(mtstate->rootResultRelInfo,
-										   mtstate->ps.state));
+	ExecSetProvidedCols(mtstate->ps.state, mtstate->mt_onConflictProvidedCols);
 
 	/*
 	 * Note that it is possible that the target tuple has been modified in
@@ -4333,7 +4331,8 @@ ExecInitMerge(ModifyTableState *mtstate, EState *estate)
 												  &mtstate->ps);
 					action_state->mas_providedCols =
 						ExecProvidedColsFromColnos(resultRelInfo, estate,
-												   action->updateColnos);
+												   action->updateColnos,
+												   action->updateIndirectCols);
 					mtstate->mt_merge_subcommands |= MERGE_UPDATE;
 					break;
 				case CMD_DELETE:
@@ -5042,9 +5041,7 @@ ExecModifyTable(PlanState *pstate)
 				}
 				slot = ExecGetUpdateNewTuple(resultRelInfo, context.planSlot,
 											 oldSlot);
-				ExecSetProvidedCols(estate,
-									ExecGetUpdatedCols(node->rootResultRelInfo,
-													   estate));
+				ExecSetProvidedCols(estate, node->mt_updateProvidedCols);
 
 				/* Now apply the update. */
 				slot = ExecUpdate(&context, resultRelInfo, tupleid, oldtuple,
@@ -5320,6 +5317,21 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 		ExecInitResultRelation(estate, mtstate->resultRelInfo,
 							   linitial_int(resultRelations));
 	}
+
+	/*
+	 * Of the columns an UPDATE assigns, the user provides only those it
+	 * assigns as a whole; see ExecGetProvidedCols.
+	 */
+	if (operation == CMD_UPDATE)
+		mtstate->mt_updateProvidedCols =
+			bms_difference(ExecGetUpdatedCols(mtstate->rootResultRelInfo,
+											  estate),
+						   node->updateIndirectCols);
+	if (node->onConflictAction == ONCONFLICT_UPDATE)
+		mtstate->mt_onConflictProvidedCols =
+			bms_difference(ExecGetUpdatedCols(mtstate->rootResultRelInfo,
+											  estate),
+						   node->onConflictIndirectCols);
 
 	/* set up epqstate with dummy subplan data for the moment */
 	EvalPlanQualInit(&mtstate->mt_epqstate, estate, NULL, NIL,

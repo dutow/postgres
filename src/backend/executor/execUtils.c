@@ -1480,11 +1480,14 @@ ExecGetProvidedCols(ResultRelInfo *relinfo, EState *estate)
  * bitmap in the query target relation's numbering
  *
  * Used for the assignment lists of MERGE actions, which the planner has
- * already converted to the result relation's numbering.
+ * already converted to the result relation's numbering.  'indirectCols' are
+ * the columns the action assigns only in part, through a subscript or a
+ * field, already in the target relation's numbering; the user provides
+ * only a piece of those, so they are left out.
  */
 Bitmapset *
 ExecProvidedColsFromColnos(ResultRelInfo *relinfo, EState *estate,
-						   List *colnos)
+						   List *colnos, Bitmapset *indirectCols)
 {
 	TupleConversionMap *map = NULL;
 	Bitmapset  *result = NULL;
@@ -1510,7 +1513,7 @@ ExecProvidedColsFromColnos(ResultRelInfo *relinfo, EState *estate,
 								attno - FirstLowInvalidHeapAttributeNumber);
 	}
 
-	return result;
+	return bms_del_members(result, indirectCols);
 }
 
 /* Return a bitmap representing generated columns being updated */

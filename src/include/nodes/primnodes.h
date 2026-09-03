@@ -2043,6 +2043,8 @@ typedef struct MergeAction
 	List	   *targetList;		/* the target list (of TargetEntry) */
 	/* target attribute numbers of an UPDATE */
 	List	   *updateColnos pg_node_attr(query_jumble_ignore);
+	/* those of them assigned only in part */
+	Bitmapset  *updateIndirectCols pg_node_attr(query_jumble_ignore);
 } MergeAction;
 
 /*

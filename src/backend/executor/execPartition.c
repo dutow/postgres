@@ -1145,7 +1145,8 @@ ExecInitPartitionInfo(ModifyTableState *mtstate, EState *estate,
 												  NULL);
 					action_state->mas_providedCols =
 						ExecProvidedColsFromColnos(leaf_part_rri, estate,
-												   action->updateColnos);
+												   action->updateColnos,
+												   action->updateIndirectCols);
 					break;
 				case CMD_DELETE:
 				case CMD_NOTHING:

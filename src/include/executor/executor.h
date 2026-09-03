@@ -745,7 +745,8 @@ extern void ExecSetProvidedCols(EState *estate, Bitmapset *cols);
 extern void ExecClearProvidedCols(EState *estate);
 extern Bitmapset *ExecGetProvidedCols(ResultRelInfo *relinfo, EState *estate);
 extern Bitmapset *ExecProvidedColsFromColnos(ResultRelInfo *relinfo,
-											 EState *estate, List *colnos);
+											 EState *estate, List *colnos,
+											 Bitmapset *indirectCols);
 extern Bitmapset *ExecGetInsertedCols(ResultRelInfo *relinfo, EState *estate);
 extern Bitmapset *ExecGetUpdatedCols(ResultRelInfo *relinfo, EState *estate);
 extern Bitmapset *ExecGetExtraUpdatedCols(ResultRelInfo *relinfo, EState *estate);
