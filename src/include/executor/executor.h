@@ -747,6 +747,8 @@ extern Bitmapset *ExecGetProvidedCols(ResultRelInfo *relinfo, EState *estate);
 extern Bitmapset *ExecProvidedColsFromColnos(ResultRelInfo *relinfo,
 											 EState *estate, List *colnos,
 											 Bitmapset *indirectCols);
+extern void ExecUnprovideTriggerCols(EState *estate, ResultRelInfo *relinfo,
+									 HeapTuple before, HeapTuple after);
 extern Bitmapset *ExecGetInsertedCols(ResultRelInfo *relinfo, EState *estate);
 extern Bitmapset *ExecGetUpdatedCols(ResultRelInfo *relinfo, EState *estate);
 extern Bitmapset *ExecGetExtraUpdatedCols(ResultRelInfo *relinfo, EState *estate);

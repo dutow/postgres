@@ -45,6 +45,7 @@
 
 #include "postgres.h"
 
+#include "access/htup_details.h"
 #include "access/parallel.h"
 #include "access/table.h"
 #include "access/tableam.h"
@@ -58,7 +59,9 @@
 #include "partitioning/partdesc.h"
 #include "port/pg_bitutils.h"
 #include "storage/lmgr.h"
+#include "utils/acl.h"
 #include "utils/builtins.h"
+#include "utils/datum.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/typcache.h"
@@ -136,6 +139,7 @@ CreateExecutorState(void)
 
 	estate->es_providedCols = NULL;
 	estate->es_providedColsValid = false;
+	estate->es_providedColsWork = NULL;
 
 	estate->es_insert_pending_result_relations = NIL;
 	estate->es_insert_pending_modifytables = NIL;
@@ -1461,6 +1465,8 @@ ExecClearProvidedCols(EState *estate)
  * can well be stored data the user may not read.  ModifyTable therefore
  * records the set per tuple.  Callers that never do (COPY, apply workers,
  * extensions) get the statement-wide answer, which is accurate for them.
+ * Either way, a BEFORE ROW trigger that overwrites one of those columns
+ * takes it back out again; see ExecUnprovideTriggerCols.
  *
  * 'relinfo' must be the relation the caller reports the tuple against, that
  * is, the query's target relation rather than a routed-to partition.
@@ -1514,6 +1520,114 @@ ExecProvidedColsFromColnos(ResultRelInfo *relinfo, EState *estate,
 	}
 
 	return bms_del_members(result, indirectCols);
+}
+
+/*
+ * Take out of the provided set the columns a BEFORE ROW trigger changed
+ *
+ * A trigger can put data of its own where the user's value was, as in
+ * NEW.col := OLD.col, so such a column is no longer one the user provided and
+ * a constraint violation must not print it without SELECT rights on it.
+ *
+ * 'before' and 'after' are the tuple as the triggers of 'relinfo' received it
+ * and as one of them returned it.  Call this before storing 'after' into the
+ * slot, which can invalidate 'before'.
+ */
+void
+ExecUnprovideTriggerCols(EState *estate, ResultRelInfo *relinfo,
+						 HeapTuple before, HeapTuple after)
+{
+	ResultRelInfo *targetrel = relinfo->ri_RootResultRelInfo;
+	TupleDesc	tupdesc = RelationGetDescr(relinfo->ri_RelationDesc);
+	TupleConversionMap *map = NULL;
+	Bitmapset  *provided;
+	Bitmapset  *changed = NULL;
+	MemoryContext oldcontext;
+
+	/*
+	 * The provided set is in the numbering of the relation the error will
+	 * report the tuple against, which for a routed tuple is the query's
+	 * target relation rather than this one.
+	 */
+	if (targetrel != NULL)
+		map = ExecGetRootToChildMap(relinfo, estate);
+	else
+		targetrel = relinfo;
+
+	provided = ExecGetProvidedCols(targetrel, estate);
+	if (bms_is_empty(provided))
+		return;
+
+	/*
+	 * Table-level SELECT makes the whole row printable, so the set will not
+	 * be consulted and comparing tuples would be wasted work.  One user runs
+	 * a given ResultRelInfo throughout, so ask only once.
+	 */
+	if (!targetrel->ri_narrowProvidedCols_valid)
+	{
+		targetrel->ri_narrowProvidedCols =
+			(pg_class_aclcheck(RelationGetRelid(targetrel->ri_RelationDesc),
+							   GetUserId(), ACL_SELECT) != ACLCHECK_OK);
+		targetrel->ri_narrowProvidedCols_valid = true;
+	}
+	if (!targetrel->ri_narrowProvidedCols)
+		return;
+
+	for (int attnum = 1; attnum <= tupdesc->natts; attnum++)
+	{
+		Form_pg_attribute att = TupleDescAttr(tupdesc, attnum - 1);
+		AttrNumber	provattno = attnum;
+		Datum		oldvalue,
+					newvalue;
+		bool		oldisnull,
+					newisnull;
+
+		if (att->attisdropped)
+			continue;
+
+		if (map != NULL)
+		{
+			/* the map is indexed by this relation's attribute numbers */
+			Assert(attnum <= map->attrMap->maplen);
+			provattno = map->attrMap->attnums[attnum - 1];
+			if (provattno == 0)
+				continue;		/* no counterpart in the target relation */
+		}
+
+		if (!bms_is_member(provattno - FirstLowInvalidHeapAttributeNumber,
+						   provided))
+			continue;
+
+		oldvalue = heap_getattr(before, attnum, tupdesc, &oldisnull);
+		newvalue = heap_getattr(after, attnum, tupdesc, &newisnull);
+
+		/*
+		 * datumIsEqual can call equal values unequal, for a value stored in
+		 * more than one way, which errs toward withholding the column.
+		 */
+		if (oldisnull != newisnull ||
+			(!oldisnull && !datumIsEqual(oldvalue, newvalue,
+										 att->attbyval, att->attlen)))
+			changed = bms_add_member(changed,
+									 provattno - FirstLowInvalidHeapAttributeNumber);
+	}
+
+	if (changed == NULL)
+		return;
+
+	/*
+	 * The set is pinned to the executor's context rather than whichever one
+	 * the caller reached here in.
+	 */
+	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+	if (provided != estate->es_providedColsWork)
+		estate->es_providedColsWork =
+			bms_replace_members(estate->es_providedColsWork, provided);
+	estate->es_providedColsWork =
+		bms_del_members(estate->es_providedColsWork, changed);
+	MemoryContextSwitchTo(oldcontext);
+
+	ExecSetProvidedCols(estate, estate->es_providedColsWork);
 }
 
 /* Return a bitmap representing generated columns being updated */

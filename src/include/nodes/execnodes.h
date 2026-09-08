@@ -535,6 +535,11 @@ typedef struct ResultRelInfo
 	/* true if the above has been computed */
 	bool		ri_extraUpdatedCols_valid;
 
+	/* false if table-level SELECT makes ExecGetProvidedCols moot here */
+	bool		ri_narrowProvidedCols;
+	/* true if the above has been computed */
+	bool		ri_narrowProvidedCols_valid;
+
 	/* Projection to generate new tuple in an INSERT/UPDATE */
 	ProjectionInfo *ri_projectNew;
 	/* Slot to hold that tuple */
@@ -744,10 +749,13 @@ typedef struct EState
 	 * values the user supplied, in the numbering of the query's target
 	 * relation.  Only used to decide what a constraint violation is allowed
 	 * to print; see ExecGetProvidedCols.  The "valid" flag distinguishes an
-	 * empty set from callers that never set this.
+	 * empty set from callers that never set this, and the third field is the
+	 * reusable allocation ExecUnprovideTriggerCols narrows into, the recorded
+	 * set itself often belonging to the plan.
 	 */
 	Bitmapset  *es_providedCols;
 	bool		es_providedColsValid;
+	Bitmapset  *es_providedColsWork;
 
 	/* Parameter info: */
 	ParamListInfo es_param_list_info;	/* values of external params */

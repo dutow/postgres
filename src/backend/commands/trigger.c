@@ -2552,6 +2552,9 @@ ExecBRInsertTriggers(EState *estate, ResultRelInfo *relinfo,
 		{
 			newtuple = check_modified_virtual_generated(RelationGetDescr(relinfo->ri_RelationDesc), newtuple);
 
+			/* must precede the store, which can invalidate oldtuple */
+			ExecUnprovideTriggerCols(estate, relinfo, oldtuple, newtuple);
+
 			ExecForceStoreHeapTuple(newtuple, slot, false);
 
 			/*
@@ -3146,6 +3149,9 @@ ExecBRUpdateTriggers(EState *estate, EPQState *epqstate,
 		else if (newtuple != oldtuple)
 		{
 			newtuple = check_modified_virtual_generated(RelationGetDescr(relinfo->ri_RelationDesc), newtuple);
+
+			/* must precede the store, which can invalidate oldtuple */
+			ExecUnprovideTriggerCols(estate, relinfo, oldtuple, newtuple);
 
 			ExecForceStoreHeapTuple(newtuple, newslot, false);
 

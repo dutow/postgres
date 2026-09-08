@@ -882,6 +882,64 @@ DROP TABLE errtst;
 DROP DOMAIN errtst_arr;
 DROP TYPE errtst_pair;
 
+-- A BEFORE ROW trigger can put data of its own where the value the user
+-- supplied was, so that column is not one the user provided either.
+CREATE TABLE errtst(id int PRIMARY KEY, other int CHECK (other < 10),
+  nn int NOT NULL, stamp int, secret text);
+CREATE FUNCTION errtst_keep() RETURNS trigger LANGUAGE plpgsql AS
+  $$ BEGIN NEW.secret := OLD.secret; RETURN NEW; END $$;
+CREATE FUNCTION errtst_own() RETURNS trigger LANGUAGE plpgsql AS
+  $$ BEGIN NEW.secret := 'trigger value'; RETURN NEW; END $$;
+CREATE FUNCTION errtst_stamp() RETURNS trigger LANGUAGE plpgsql AS
+  $$ BEGIN NEW.stamp := NEW.stamp + 1; RETURN NEW; END $$;
+CREATE FUNCTION errtst_pass() RETURNS trigger LANGUAGE plpgsql AS
+  $$ BEGIN RETURN NEW; END $$;
+GRANT SELECT (id) ON TABLE errtst TO regress_priv_user2;
+GRANT INSERT (id, nn, secret) ON TABLE errtst TO regress_priv_user2;
+GRANT UPDATE (other, nn, secret) ON TABLE errtst TO regress_priv_user2;
+
+INSERT INTO errtst VALUES (1, 1, 1, 1, 'top secret');
+
+CREATE TRIGGER errtst_own BEFORE INSERT ON errtst
+  FOR EACH ROW EXECUTE FUNCTION errtst_own();
+SET SESSION AUTHORIZATION regress_priv_user2;
+INSERT INTO errtst (id, nn, secret) VALUES (2, NULL, 'mine');
+SET SESSION AUTHORIZATION regress_priv_user1;
+DROP TRIGGER errtst_own ON errtst;
+
+CREATE TRIGGER errtst_keep BEFORE UPDATE ON errtst
+  FOR EACH ROW EXECUTE FUNCTION errtst_keep();
+SET SESSION AUTHORIZATION regress_priv_user2;
+UPDATE errtst SET other = 10, secret = 'mine';
+UPDATE errtst SET nn = NULL, secret = 'mine';
+INSERT INTO errtst (id, nn, secret) VALUES (1, 1, 'mine')
+  ON CONFLICT (id) DO UPDATE SET other = 10, secret = 'mine';
+MERGE INTO errtst USING (VALUES (1)) v(id) ON errtst.id = v.id
+  WHEN MATCHED THEN UPDATE SET other = 10, secret = 'mine';
+SET SESSION AUTHORIZATION regress_priv_user1;
+DROP TRIGGER errtst_keep ON errtst;
+
+-- a trigger that changes some other column leaves the provided ones visible
+CREATE TRIGGER errtst_stamp BEFORE UPDATE ON errtst
+  FOR EACH ROW EXECUTE FUNCTION errtst_stamp();
+SET SESSION AUTHORIZATION regress_priv_user2;
+UPDATE errtst SET other = 10, secret = 'mine';
+SET SESSION AUTHORIZATION regress_priv_user1;
+DROP TRIGGER errtst_stamp ON errtst;
+
+-- nor does a trigger that returns the tuple it was given
+CREATE TRIGGER errtst_pass BEFORE UPDATE ON errtst
+  FOR EACH ROW EXECUTE FUNCTION errtst_pass();
+SET SESSION AUTHORIZATION regress_priv_user2;
+UPDATE errtst SET other = 10, secret = 'mine';
+
+SET SESSION AUTHORIZATION regress_priv_user1;
+DROP TABLE errtst;
+DROP FUNCTION errtst_keep();
+DROP FUNCTION errtst_own();
+DROP FUNCTION errtst_stamp();
+DROP FUNCTION errtst_pass();
+
 -- test column-level privileges on the range used in FOR PORTION OF
 SET SESSION AUTHORIZATION regress_priv_user1;
 CREATE TABLE t1 (

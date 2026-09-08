@@ -923,7 +923,7 @@ set role regress_coldesc_role;
 with result as (insert into brtrigpartcon values (1, 'hi there') returning 1)
   insert into inserttest3 (f3) select * from result;
 ERROR:  new row for relation "brtrigpartcon1" violates partition constraint
-DETAIL:  Failing row contains (a, b) = (2, hi there).
+DETAIL:  Failing row contains (b) = (hi there).
 reset role;
 -- cleanup
 revoke all on inserttest3 from regress_coldesc_role;
