@@ -2412,6 +2412,13 @@ REVOKE ALL ON accounts FROM PUBLIC;
        Allows creation of a trigger on a table, view, etc. Great care should be
        taken when granting this privilege, since any triggers added to a table
        or view will be executed with the privileges of users who modify it.
+       Such a trigger is also given every column of the rows being modified,
+       whatever column-level <literal>SELECT</literal> privileges the trigger's
+       author and the user modifying the table hold, and a
+       <literal>BEFORE</literal> row-level trigger may rewrite any column of
+       the row that then gets stored, without column-level
+       <literal>INSERT</literal> or <literal>UPDATE</literal> privileges on
+       it.
       </para>
      </listitem>
     </varlistentry>
