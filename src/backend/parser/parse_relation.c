@@ -1447,6 +1447,34 @@ buildNSItemFromLists(RangeTblEntry *rte, Index rtindex,
 }
 
 /*
+ * Does a schema-qualified RangeVar name the given relation?
+ */
+static bool
+rangevar_names_relid(const RangeVar *relation, Oid relid)
+{
+	char	   *relname;
+	char	   *nspname;
+	bool		result;
+
+	if (relation->catalogname != NULL || relation->schemaname == NULL)
+		return false;
+
+	relname = get_rel_name(relid);
+	if (relname == NULL)
+		return false;
+	nspname = get_namespace_name(get_rel_namespace(relid));
+
+	result = (nspname != NULL &&
+			  strcmp(relation->schemaname, nspname) == 0 &&
+			  strcmp(relation->relname, relname) == 0);
+
+	pfree(relname);
+	if (nspname != NULL)
+		pfree(nspname);
+	return result;
+}
+
+/*
  * Open a table during parse analysis
  *
  * This is essentially just the same as table_openrv(), except that it caters
@@ -1460,6 +1488,22 @@ parserOpenTable(ParseState *pstate, const RangeVar *relation, LOCKMODE lockmode)
 	ParseCallbackState pcbstate;
 
 	setup_parser_errposition_callback(&pcbstate, pstate, relation->location);
+
+	/*
+	 * The relation the caller wants checked as its owner is opened by OID.
+	 * That skips the name lookup and with it the USAGE check on the schema,
+	 * which the caller does not require of the current user; see the
+	 * comments for p_check_as_owner_relid.  Insist on an exact name match so
+	 * that the bypass cannot resolve any other name.
+	 */
+	if (OidIsValid(pstate->p_check_as_owner_relid) &&
+		rangevar_names_relid(relation, pstate->p_check_as_owner_relid))
+	{
+		rel = table_open(pstate->p_check_as_owner_relid, lockmode);
+		cancel_parser_errposition_callback(&pcbstate);
+		return rel;
+	}
+
 	rel = table_openrv_extended(relation, lockmode, true);
 	if (rel == NULL)
 	{
@@ -1561,6 +1605,9 @@ addRangeTableEntry(ParseState *pstate,
 
 	perminfo = addRTEPermissionInfo(&pstate->p_rteperminfos, rte);
 	perminfo->requiredPerms = ACL_SELECT;
+	if (OidIsValid(pstate->p_check_as_owner_relid) &&
+		pstate->p_check_as_owner_relid == rte->relid)
+		perminfo->checkAsUser = rel->rd_rel->relowner;
 
 	/*
 	 * Add completed RTE to pstate's range table list, so that we know its

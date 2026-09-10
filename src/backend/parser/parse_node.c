@@ -59,6 +59,7 @@ make_parsestate(ParseState *parentParseState)
 		pstate->p_ref_hook_state = parentParseState->p_ref_hook_state;
 		/* query environment stays in context for the whole parse analysis */
 		pstate->p_queryEnv = parentParseState->p_queryEnv;
+		pstate->p_check_as_owner_relid = parentParseState->p_check_as_owner_relid;
 	}
 
 	return pstate;
