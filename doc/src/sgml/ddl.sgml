@@ -2396,11 +2396,13 @@ REVOKE ALL ON accounts FROM PUBLIC;
      <listitem>
       <para>
        Allows creation of a foreign key constraint referencing a
-       table, or specific column(s) of a table. Great care should be taken when
-       granting this privilege, since a user who creates a foreign key can arrange
-       for enforcement of that foreign key to call an arbitrary function, such as
-       a cast function, and such functions will be called with the privileges of
-       the table owner.
+       table, or specific column(s) of a table.  Enforcing the foreign key
+       reads and locks rows of the referenced table with the table owner's
+       privileges, but any function the check has to call, such as a cast
+       function chosen by the referencing table's owner, runs as the
+       unprivileged
+       <link linkend="predefined-role-pg-ri-check"><literal>pg_ri_check</literal></link>
+       role.
       </para>
      </listitem>
     </varlistentry>

@@ -105,13 +105,14 @@ check_enable_rls(Oid relid, Oid checkAsUser, bool noError)
 		 * RLS_NONE_ENV.
 		 *
 		 * InNoForceRLSOperation indicates that we should not apply RLS even
-		 * if the table has FORCE RLS set - IF the current user is the owner.
-		 * This is specifically to ensure that referential integrity checks
-		 * are able to still run correctly.
+		 * if the table has FORCE RLS set - IF the user being checked is the
+		 * owner.  This is specifically to ensure that referential integrity
+		 * checks are able to still run correctly.
 		 *
-		 * This is intentionally only done after we have checked that the user
-		 * is the table owner, which should always be the case for referential
-		 * integrity checks.
+		 * This is intentionally only done after we have checked that user_id
+		 * is the table owner.  Referential integrity queries run as
+		 * pg_ri_check but pass the table owner as checkAsUser, so this is
+		 * always the case for them.
 		 */
 		if (!relforcerowsecurity || InNoForceRLSOperation())
 			return RLS_NONE_ENV;

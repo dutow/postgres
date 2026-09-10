@@ -2590,8 +2590,9 @@ CREATE TABLE fk_defer_t2_pk (id int PRIMARY KEY);
 CREATE TABLE fk_defer_t2 (a int REFERENCES fk_defer_t2_pk(id)
     DEFERRABLE INITIALLY DEFERRED);
 CREATE TYPE fk_defer_vch AS (v int);
+-- cast runs as pg_ri_check; SECURITY DEFINER keeps the side effects working
 CREATE FUNCTION fk_defer_cast(fk_defer_vch) RETURNS int
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
     INSERT INTO fk_defer_t2 VALUES (999);   -- 999 absent, queues deferred check
     RETURN $1.v;
@@ -2738,7 +2739,8 @@ DROP TABLE fp_fk_dup, fp_pk_dup;
 CREATE TABLE fp_reentry_pk (id int PRIMARY KEY);
 INSERT INTO fp_reentry_pk VALUES (1), (2);
 CREATE TYPE fp_vch AS (v int);
-CREATE FUNCTION fp_vcast(fp_vch) RETURNS int LANGUAGE plpgsql AS $$
+-- cast runs as pg_ri_check; SECURITY DEFINER keeps the side effects working
+CREATE FUNCTION fp_vcast(fp_vch) RETURNS int LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
     IF $1.v = 1 THEN
         INSERT INTO fp_reentry_fk VALUES (row(2)::fp_vch);
@@ -2820,6 +2822,9 @@ CREATE TYPE fkint (INPUT = fkint_in, OUTPUT = fkint_out, LIKE = int4);
 -- Renames the constraint the first time it is called, and so raises an
 -- invalidation partway through the flush.  Guarded on the catalog so the
 -- second and later calls are no-ops.
+--
+-- The cast runs as pg_ri_check; SECURITY DEFINER keeps the side effects
+-- working.
 CREATE FUNCTION fkint_to_int4(fkint) RETURNS int4 AS $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_constraint
@@ -2829,7 +2834,7 @@ BEGIN
                 ' RENAME CONSTRAINT fktable_inval_fk TO fktable_inval_fk2';
     END IF;
     RETURN format('%s', $1)::int4;
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE CAST (fkint AS int4) WITH FUNCTION fkint_to_int4(fkint) AS IMPLICIT;
 
@@ -3032,3 +3037,150 @@ INSERT INTO fp_deferred_pk VALUES (1);
 COMMIT;
 SELECT count(*) AS deferred_rows FROM fp_deferred_fk;  -- 1, check passed at commit
 DROP TABLE fp_deferred_fk, fp_deferred_pk;
+--
+-- Referenced-side RI checks run as pg_ri_check, not as the referenced
+-- table's owner.  A REFERENCES grantee can bind an arbitrary function into
+-- the implicit cast the check applies; it must not gain the owner's rights.
+--
+CREATE ROLE regress_ri_pk_owner;
+CREATE ROLE regress_ri_fk_owner;
+CREATE SCHEMA regress_ri_pk_schema AUTHORIZATION regress_ri_pk_owner;
+CREATE SCHEMA regress_ri_fk_schema AUTHORIZATION regress_ri_fk_owner;
+-- pg_ri_check gets no explicit USAGE here; it must rely on its implicit one
+GRANT USAGE ON SCHEMA regress_ri_pk_schema TO regress_ri_fk_owner;
+
+SET ROLE regress_ri_pk_owner;
+CREATE TABLE regress_ri_pk_schema.pk (id int PRIMARY KEY, secret text);
+INSERT INTO regress_ri_pk_schema.pk VALUES (1, 'top secret');
+GRANT REFERENCES (id) ON regress_ri_pk_schema.pk TO regress_ri_fk_owner;
+-- partitioned referenced table forces the SPI path
+CREATE TABLE regress_ri_pk_schema.ppk (id int PRIMARY KEY, secret text)
+  PARTITION BY RANGE (id);
+CREATE TABLE regress_ri_pk_schema.ppk1
+  PARTITION OF regress_ri_pk_schema.ppk FOR VALUES FROM (0) TO (100);
+INSERT INTO regress_ri_pk_schema.ppk VALUES (1, 'top secret');
+GRANT REFERENCES (id) ON regress_ri_pk_schema.ppk TO regress_ri_fk_owner;
+RESET ROLE;
+
+SET ROLE regress_ri_fk_owner;
+SET search_path = regress_ri_fk_schema;
+CREATE TYPE ri_key AS (n int);
+CREATE FUNCTION ri_key_to_int(k ri_key) RETURNS int LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'cast runs as %', current_user;
+  RETURN k.n;
+END $$;
+CREATE CAST (ri_key AS int) WITH FUNCTION ri_key_to_int(ri_key) AS IMPLICIT;
+CREATE TABLE pfk (k ri_key REFERENCES regress_ri_pk_schema.ppk (id));
+CREATE TABLE fk (k ri_key REFERENCES regress_ri_pk_schema.pk (id));
+INSERT INTO pfk VALUES (ROW(1));
+INSERT INTO fk VALUES (ROW(1));
+
+-- the cast must not be able to use the referenced table
+CREATE OR REPLACE FUNCTION ri_key_to_int(k ri_key) RETURNS int
+LANGUAGE plpgsql AS $$
+DECLARE s text;
+BEGIN
+  SELECT secret INTO s FROM regress_ri_pk_schema.pk WHERE id = k.n;
+  RAISE NOTICE 'leaked: %', s;
+  RETURN k.n;
+END $$;
+INSERT INTO pfk VALUES (ROW(1));
+INSERT INTO fk VALUES (ROW(1));
+
+CREATE OR REPLACE FUNCTION ri_key_to_int(k ri_key) RETURNS int
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'cast runs as %', current_user;
+  RETURN k.n;
+END $$;
+-- functions the check needs must be executable by pg_ri_check
+REVOKE EXECUTE ON FUNCTION ri_key_to_int(ri_key) FROM PUBLIC;
+INSERT INTO pfk VALUES (ROW(1));
+INSERT INTO fk VALUES (ROW(1));
+GRANT EXECUTE ON FUNCTION ri_key_to_int(ri_key) TO pg_ri_check;
+INSERT INTO pfk VALUES (ROW(1));
+INSERT INTO fk VALUES (ROW(1));
+RESET search_path;
+RESET ROLE;
+
+-- key update on the PK side: ri_Check_Pk_Match runs as pg_ri_check (no cast
+-- involved, so no NOTICE from it); the NOTICE comes from the FK-owner
+-- restrict scan
+SET ROLE regress_ri_pk_owner;
+UPDATE regress_ri_pk_schema.pk SET id = 2 WHERE id = 1;
+UPDATE regress_ri_pk_schema.ppk SET id = 2 WHERE id = 1;
+
+-- a SECURITY DEFINER cast function is the escape hatch back to the owner's
+-- rights, so it must be gated by EXECUTE for pg_ri_check.  A new key type is
+-- needed: the RI compare cache keeps the cast function per (operator, type)
+-- and is never invalidated, so swapping the cast on ri_key would not show.
+RESET ROLE;
+GRANT USAGE ON SCHEMA regress_ri_fk_schema TO regress_ri_pk_owner;
+SET ROLE regress_ri_fk_owner;
+CREATE TYPE regress_ri_fk_schema.ri_key2 AS (n int);
+RESET ROLE;
+SET ROLE regress_ri_pk_owner;
+CREATE FUNCTION regress_ri_pk_schema.secdef_key_to_int(regress_ri_fk_schema.ri_key2)
+RETURNS int LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  RAISE NOTICE 'secdef cast runs as %', current_user;
+  RETURN $1.n;
+END $$;
+REVOKE EXECUTE ON FUNCTION regress_ri_pk_schema.secdef_key_to_int(regress_ri_fk_schema.ri_key2) FROM PUBLIC;
+RESET ROLE;
+SET ROLE regress_ri_fk_owner;
+SET search_path = regress_ri_fk_schema;
+-- CREATE CAST does not check EXECUTE on the function
+CREATE CAST (ri_key2 AS int) WITH FUNCTION regress_ri_pk_schema.secdef_key_to_int(ri_key2) AS IMPLICIT;
+CREATE TABLE fk2 (k ri_key2 REFERENCES regress_ri_pk_schema.pk (id));
+CREATE TABLE pfk2 (k ri_key2 REFERENCES regress_ri_pk_schema.ppk (id));
+INSERT INTO fk2 VALUES (ROW(1));
+INSERT INTO pfk2 VALUES (ROW(1));
+RESET ROLE;
+SET ROLE regress_ri_pk_owner;
+GRANT EXECUTE ON FUNCTION regress_ri_pk_schema.secdef_key_to_int(regress_ri_fk_schema.ri_key2) TO pg_ri_check;
+RESET ROLE;
+SET ROLE regress_ri_fk_owner;
+INSERT INTO fk2 VALUES (ROW(1));
+INSERT INTO pfk2 VALUES (ROW(1));
+RESET search_path;
+RESET ROLE;
+
+-- temporal foreign keys take a separate query path; the keys are ranges
+-- because int has no default GiST opclass in core, and the polymorphic
+-- opclass input type leaves no room for a cast on the referencing side
+SET ROLE regress_ri_pk_owner;
+CREATE TABLE regress_ri_pk_schema.tpk (id int4range, valid_at daterange,
+  PRIMARY KEY (id, valid_at WITHOUT OVERLAPS));
+INSERT INTO regress_ri_pk_schema.tpk VALUES ('[1,2)', '[2020-01-01,2021-01-01)');
+GRANT REFERENCES (id, valid_at) ON regress_ri_pk_schema.tpk TO regress_ri_fk_owner;
+RESET ROLE;
+SET ROLE regress_ri_fk_owner;
+CREATE TABLE regress_ri_fk_schema.tfk (k int4range, valid_at daterange,
+  FOREIGN KEY (k, PERIOD valid_at)
+    REFERENCES regress_ri_pk_schema.tpk (id, PERIOD valid_at));
+INSERT INTO regress_ri_fk_schema.tfk VALUES ('[1,2)', '[2020-03-01,2020-06-01)');
+INSERT INTO regress_ri_fk_schema.tfk VALUES ('[1,2)', '[2020-03-01,2022-01-01)');
+RESET ROLE;
+
+SET ROLE regress_ri_pk_owner;
+-- RI checks still bypass row-level security on the referenced table
+ALTER TABLE regress_ri_pk_schema.pk ENABLE ROW LEVEL SECURITY;
+ALTER TABLE regress_ri_pk_schema.pk FORCE ROW LEVEL SECURITY;
+CREATE POLICY nothing ON regress_ri_pk_schema.pk USING (false);
+ALTER TABLE regress_ri_pk_schema.ppk ENABLE ROW LEVEL SECURITY;
+ALTER TABLE regress_ri_pk_schema.ppk FORCE ROW LEVEL SECURITY;
+CREATE POLICY nothing ON regress_ri_pk_schema.ppk USING (false);
+RESET ROLE;
+SET ROLE regress_ri_fk_owner;
+INSERT INTO regress_ri_fk_schema.fk VALUES (ROW(1));
+INSERT INTO regress_ri_fk_schema.pfk VALUES (ROW(1));
+INSERT INTO regress_ri_fk_schema.fk VALUES (ROW(2));
+INSERT INTO regress_ri_fk_schema.pfk VALUES (ROW(2));
+RESET ROLE;
+
+DROP SCHEMA regress_ri_fk_schema CASCADE;
+DROP SCHEMA regress_ri_pk_schema CASCADE;
+DROP ROLE regress_ri_fk_owner;
+DROP ROLE regress_ri_pk_owner;

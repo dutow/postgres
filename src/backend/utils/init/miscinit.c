@@ -596,9 +596,10 @@ SetAuthenticatedUserId(Oid userid)
  * SECURITY_NOFORCE_RLS indicates that we are inside an operation which should
  * ignore the FORCE ROW LEVEL SECURITY per-table indication.  This is used to
  * ensure that FORCE RLS does not mistakenly break referential integrity
- * checks.  Note that this is intentionally only checked when running as the
- * owner of the table (which should always be the case for referential
- * integrity checks).
+ * checks.  Note that this intentionally only applies when the user whose
+ * permissions are being checked is the owner of the table; referential
+ * integrity checks run as pg_ri_check but arrange for that by passing the
+ * table owner as checkAsUser.
  *
  * Unlike GetUserId, GetUserIdAndSecContext does *not* Assert that the current
  * value of CurrentUserId is valid; nor does SetUserIdAndSecContext require
