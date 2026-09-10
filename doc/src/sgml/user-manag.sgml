@@ -766,6 +766,27 @@ GRANT pg_signal_backend TO admin_user;
      </listitem>
     </varlistentry>
 
+    <varlistentry id="predefined-role-pg-ri-check" xreflabel="pg_ri_check">
+     <term><varname>pg_ri_check</varname></term>
+     <listitem>
+      <para>
+       <literal>pg_ri_check</literal> is the role the server switches to
+       while checking a foreign key against its referenced table.  It has no
+       privileges of its own, does not inherit the privileges of roles
+       granted to it, and should not be granted to anyone.  Functions that a
+       foreign key check has to call, such as cast functions between the
+       referencing and referenced column types, must be executable by this
+       role.  If <literal>EXECUTE</literal> on such a function was revoked
+       from <literal>PUBLIC</literal>, grant it to
+       <literal>pg_ri_check</literal>.  Do not grant this role any privilege
+       beyond <literal>EXECUTE</literal> on the functions foreign key checks
+       need: anyone who can create a table can create a foreign key, so
+       code chosen by any user runs as this role, and whatever it can access
+       is effectively accessible to everyone.
+      </para>
+     </listitem>
+    </varlistentry>
+
     <varlistentry id="predefined-role-pg-signal-autovacuum-worker" xreflabel="pg_signal_autovacuum_worker">
      <term><varname>pg_signal_autovacuum_worker</varname></term>
      <listitem>
