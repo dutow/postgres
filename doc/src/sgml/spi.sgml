@@ -1352,6 +1352,28 @@ SPIPlanPtr SPI_prepare_extended(const char * <parameter>command</parameter>,
      </para>
     </listitem>
    </varlistentry>
+
+   <varlistentry>
+    <term><literal>int <parameter>nargs</parameter></literal></term>
+    <listitem>
+     <para>
+      number of input parameters (<literal>$1</literal>, <literal>$2</literal>, etc.)
+      for later <function>SPI_execute_plan</function> calls; may be zero
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><literal>const Oid * <parameter>argtypes</parameter></literal></term>
+    <listitem>
+     <para>
+      pointer to an array containing the <acronym>OID</acronym>s of the
+      data types of the parameters.  If <parameter>parserSetup</parameter>
+      is also given, the hook must still register these types with the
+      parser.
+     </para>
+    </listitem>
+   </varlistentry>
   </variablelist>
  </refsect1>
 

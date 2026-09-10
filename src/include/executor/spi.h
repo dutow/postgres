@@ -40,6 +40,13 @@ typedef struct SPIPrepareOptions
 	void	   *parserSetupArg;
 	RawParseMode parseMode;
 	int			cursorOptions;
+	/*
+	 * Parameter types for later SPI_execute_plan()-style calls.  When a
+	 * parserSetup hook is given, the hook is still responsible for making
+	 * the parser aware of them (e.g. via setup_parse_fixed_parameters()).
+	 */
+	int			nargs;
+	const Oid  *argtypes;
 } SPIPrepareOptions;
 
 /* Optional arguments for SPI_execute[_plan]_extended */
