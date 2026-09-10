@@ -1561,6 +1561,9 @@ addRangeTableEntry(ParseState *pstate,
 
 	perminfo = addRTEPermissionInfo(&pstate->p_rteperminfos, rte);
 	perminfo->requiredPerms = ACL_SELECT;
+	if (OidIsValid(pstate->p_check_as_owner_relid) &&
+		pstate->p_check_as_owner_relid == rte->relid)
+		perminfo->checkAsUser = rel->rd_rel->relowner;
 
 	/*
 	 * Add completed RTE to pstate's range table list, so that we know its

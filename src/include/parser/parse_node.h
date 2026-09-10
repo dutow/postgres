@@ -218,6 +218,14 @@ struct ParseState
 
 	QueryEnvironment *p_queryEnv;	/* curr env, incl refs to enclosing env */
 
+	/*
+	 * If valid, RTEs for this relation have their permissions checked as the
+	 * relation's owner instead of the current user (perminfo->checkAsUser).
+	 * Used by referential integrity checks, which run as an unprivileged
+	 * role but must be able to read and lock the referenced rows.
+	 */
+	Oid			p_check_as_owner_relid;
+
 	/* Flags telling about things found in the query: */
 	bool		p_hasAggs;
 	bool		p_hasWindowFuncs;
