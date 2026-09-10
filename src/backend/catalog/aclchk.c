@@ -3724,11 +3724,14 @@ pg_namespace_aclmask_ext(Oid nsp_oid, Oid roleid,
 	 * Check if ACL_USAGE is being checked and, if so, and not set already as
 	 * part of the result, then check if the user is a member of the
 	 * pg_read_all_data or pg_write_all_data roles, which allow usage access
-	 * to all schemas.
+	 * to all schemas.  pg_ri_check also gets USAGE everywhere: referential
+	 * integrity queries run as that role and must be able to name the
+	 * referenced table.
 	 */
 	if (mask & ACL_USAGE && !(result & ACL_USAGE) &&
 		(has_privs_of_role(roleid, ROLE_PG_READ_ALL_DATA) ||
-		 has_privs_of_role(roleid, ROLE_PG_WRITE_ALL_DATA)))
+		 has_privs_of_role(roleid, ROLE_PG_WRITE_ALL_DATA) ||
+		 roleid == ROLE_PG_RI_CHECK))
 		result |= ACL_USAGE;
 	return result;
 }
