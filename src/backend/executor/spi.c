@@ -918,8 +918,8 @@ SPI_prepare_extended(const char *src,
 	plan.magic = _SPI_PLAN_MAGIC;
 	plan.parse_mode = options->parseMode;
 	plan.cursor_options = options->cursorOptions;
-	plan.nargs = 0;
-	plan.argtypes = NULL;
+	plan.nargs = options->nargs;
+	plan.argtypes = options->argtypes;
 	plan.parserSetup = options->parserSetup;
 	plan.parserSetupArg = options->parserSetupArg;
 
@@ -2205,9 +2205,10 @@ spi_printtup(TupleTableSlot *slot, DestReceiver *self)
 /*
  * Parse and analyze a querystring.
  *
- * At entry, plan->argtypes and plan->nargs (or alternatively plan->parserSetup
- * and plan->parserSetupArg) must be valid, as must plan->parse_mode and
- * plan->cursor_options.
+ * At entry, plan->parse_mode and plan->cursor_options must be valid.  The
+ * caller may supply plan->argtypes and plan->nargs, plan->parserSetup and
+ * plan->parserSetupArg, or both; when both are given, the hook must register
+ * the same parameter types.
  *
  * Results are stored into *plan (specifically, plan->plancache_list).
  * Note that the result data is all in CurrentMemoryContext or child contexts
@@ -2261,11 +2262,11 @@ _SPI_prepare_plan(const char *src, SPIPlanPtr plan)
 
 		/*
 		 * Parameter datatypes are driven by parserSetup hook if provided,
-		 * otherwise we use the fixed parameter list.
+		 * otherwise we use the fixed parameter list.  A caller may supply
+		 * both, in which case the hook must register the same types.
 		 */
 		if (plan->parserSetup != NULL)
 		{
-			Assert(plan->nargs == 0);
 			stmt_list = pg_analyze_and_rewrite_withcb(parsetree,
 													  src,
 													  plan->parserSetup,
