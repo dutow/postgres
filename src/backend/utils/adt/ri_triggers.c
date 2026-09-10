@@ -34,6 +34,7 @@
 #include "catalog/index.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_am_d.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_index.h"
@@ -45,6 +46,7 @@
 #include "lib/ilist.h"
 #include "miscadmin.h"
 #include "parser/parse_coerce.h"
+#include "parser/parse_param.h"
 #include "parser/parse_relation.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -206,6 +208,14 @@ typedef struct RI_QueryHashEntry
 {
 	RI_QueryKey key;
 	SPIPlanPtr	plan;
+
+	/*
+	 * Parser setup state for queries against the PK table.  Lives in the
+	 * hash entry so that plancache revalidation can re-run ri_ParserSetup.
+	 */
+	Oid			pk_relid;
+	int			nargs;
+	Oid			argtypes[RI_MAX_NUMKEYS];
 } RI_QueryHashEntry;
 
 /*
@@ -357,7 +367,9 @@ static void ri_InitHashTables(void);
 static void InvalidateConstraintCacheCallBack(Datum arg, SysCacheIdentifier cacheid,
 											  uint32 hashvalue);
 static SPIPlanPtr ri_FetchPreparedPlan(RI_QueryKey *key);
-static void ri_HashPreparedPlan(RI_QueryKey *key, SPIPlanPtr plan);
+static RI_QueryHashEntry *ri_GetQueryHashEntry(RI_QueryKey *key);
+static void ri_HashPreparedPlan(RI_QueryHashEntry *entry, SPIPlanPtr plan);
+static void ri_ParserSetup(ParseState *pstate, void *arg);
 static RI_CompareHashEntry *ri_HashCompareOp(Oid eq_opr, Oid typeid);
 
 static void ri_CheckTrigger(FunctionCallInfo fcinfo, const char *funcname,
@@ -2693,6 +2705,20 @@ InvalidateConstraintCacheCallBack(Datum arg, SysCacheIdentifier cacheid,
 
 
 /*
+ * Parser setup for RI queries against the PK table.  Registers the parameter
+ * types and asks the parser to check the PK relation's permissions as its
+ * owner, so the query itself needs no privileges of the current user.
+ */
+static void
+ri_ParserSetup(ParseState *pstate, void *arg)
+{
+	RI_QueryHashEntry *entry = (RI_QueryHashEntry *) arg;
+
+	setup_parse_fixed_parameters(pstate, entry->argtypes, entry->nargs);
+	pstate->p_check_as_owner_relid = entry->pk_relid;
+}
+
+/*
  * Prepare execution plan for a query to enforce an RI restriction
  */
 static SPIPlanPtr
@@ -2700,37 +2726,48 @@ ri_PlanCheck(const char *querystr, int nargs, const Oid *argtypes,
 			 RI_QueryKey *qkey, Relation fk_rel, Relation pk_rel)
 {
 	SPIPlanPtr	qplan;
-	Relation	query_rel;
+	RI_QueryHashEntry *entry = ri_GetQueryHashEntry(qkey);
+	bool		on_pk = (qkey->constr_queryno <= RI_PLAN_LAST_ON_PK);
 	Oid			save_userid;
 	int			save_sec_context;
 
 	/*
-	 * Use the query type code to determine whether the query is run against
-	 * the PK or FK table; we'll do the check as that table's owner
+	 * Queries against the PK table run as pg_ri_check; ri_ParserSetup makes
+	 * the PK RTE's permissions be checked as the PK owner.  Queries against
+	 * the FK table run as the FK owner.
 	 */
-	if (qkey->constr_queryno <= RI_PLAN_LAST_ON_PK)
-		query_rel = pk_rel;
-	else
-		query_rel = fk_rel;
-
-	/* Switch to proper UID to perform check as */
 	GetUserIdAndSecContext(&save_userid, &save_sec_context);
-	SetUserIdAndSecContext(RelationGetForm(query_rel)->relowner,
+	SetUserIdAndSecContext(on_pk ? ROLE_PG_RI_CHECK :
+						   RelationGetForm(fk_rel)->relowner,
 						   save_sec_context | SECURITY_LOCAL_USERID_CHANGE |
 						   SECURITY_NOFORCE_RLS);
 
-	/* Create the plan */
-	qplan = SPI_prepare(querystr, nargs, argtypes);
+	if (on_pk)
+	{
+		SPIPrepareOptions options;
+
+		Assert(nargs <= lengthof(entry->argtypes));
+		entry->pk_relid = RelationGetRelid(pk_rel);
+		entry->nargs = nargs;
+		memcpy(entry->argtypes, argtypes, nargs * sizeof(Oid));
+
+		memset(&options, 0, sizeof(options));
+		options.parserSetup = ri_ParserSetup;
+		options.parserSetupArg = entry;
+		options.nargs = nargs;
+		options.argtypes = argtypes;
+		qplan = SPI_prepare_extended(querystr, &options);
+	}
+	else
+		qplan = SPI_prepare(querystr, nargs, argtypes);
 
 	if (qplan == NULL)
 		elog(ERROR, "SPI_prepare returned %s for %s", SPI_result_code_string(SPI_result), querystr);
 
-	/* Restore UID and security context */
 	SetUserIdAndSecContext(save_userid, save_sec_context);
 
-	/* Save the plan */
 	SPI_keepplan(qplan);
-	ri_HashPreparedPlan(qkey, qplan);
+	ri_HashPreparedPlan(entry, qplan);
 
 	return qplan;
 }
@@ -2760,7 +2797,7 @@ ri_PerformCheck(const RI_ConstraintInfo *riinfo,
 
 	/*
 	 * Use the query type code to determine whether the query is run against
-	 * the PK or FK table; we'll do the check as that table's owner
+	 * the PK or FK table.
 	 */
 	if (qkey->constr_queryno <= RI_PLAN_LAST_ON_PK)
 		query_rel = pk_rel;
@@ -2832,9 +2869,14 @@ ri_PerformCheck(const RI_ConstraintInfo *riinfo,
 	 */
 	limit = (expect_OK == SPI_OK_SELECT) ? 1 : 0;
 
-	/* Switch to proper UID to perform check as */
+	/*
+	 * Queries against the PK table run as pg_ri_check (see ri_PlanCheck);
+	 * queries against the FK table run as the FK owner.
+	 */
 	GetUserIdAndSecContext(&save_userid, &save_sec_context);
-	SetUserIdAndSecContext(RelationGetForm(query_rel)->relowner,
+	SetUserIdAndSecContext(qkey->constr_queryno <= RI_PLAN_LAST_ON_PK ?
+						   ROLE_PG_RI_CHECK :
+						   RelationGetForm(query_rel)->relowner,
 						   save_sec_context | SECURITY_LOCAL_USERID_CHANGE |
 						   SECURITY_NOFORCE_RLS);
 
@@ -2951,7 +2993,7 @@ ri_FastPathCheck(RI_ConstraintInfo *riinfo,
 	slot = table_slot_create(pk_rel, NULL);
 
 	GetUserIdAndSecContext(&saved_userid, &saved_sec_context);
-	SetUserIdAndSecContext(RelationGetForm(pk_rel)->relowner,
+	SetUserIdAndSecContext(ROLE_PG_RI_CHECK,
 						   saved_sec_context |
 						   SECURITY_LOCAL_USERID_CHANGE |
 						   SECURITY_NOFORCE_RLS);
@@ -2959,9 +3001,9 @@ ri_FastPathCheck(RI_ConstraintInfo *riinfo,
 
 	/*
 	 * Begin the scan under the switched user id, so that any access method
-	 * code invoked by index_beginscan() runs as the PK relation's owner.  For
-	 * btree this has no functional consequence, but it keeps the ordering
-	 * correct for out-of-tree access methods.
+	 * code invoked by index_beginscan() runs as pg_ri_check.  For btree this
+	 * has no functional consequence, but it keeps the ordering correct for
+	 * out-of-tree access methods.
 	 */
 	scandesc = index_beginscan(pk_rel, idx_rel, false,
 							   snapshot, NULL,
@@ -3096,7 +3138,7 @@ ri_FastPathBatchFlush(RI_FastPathEntry *fpentry, Relation fk_rel,
 	 * triggers for the buffered rows have already fired (trigger invocations
 	 * strictly alternate per row), so a single CCI advances past all their
 	 * effects.  Per-row security context switch is unnecessary because each
-	 * row's probe runs entirely as the PK table owner, same as the SPI path
+	 * row's probe runs entirely as pg_ri_check, same as the SPI path
 	 * -- the only difference is that the SPI path sets and restores the
 	 * context per row whereas we do it once around the whole batch.
 	 */
@@ -3111,7 +3153,7 @@ ri_FastPathBatchFlush(RI_FastPathEntry *fpentry, Relation fk_rel,
 	oldcxt = MemoryContextSwitchTo(fpentry->flush_cxt);
 
 	GetUserIdAndSecContext(&saved_userid, &saved_sec_context);
-	SetUserIdAndSecContext(RelationGetForm(pk_rel)->relowner,
+	SetUserIdAndSecContext(ROLE_PG_RI_CHECK,
 						   saved_sec_context |
 						   SECURITY_LOCAL_USERID_CHANGE |
 						   SECURITY_NOFORCE_RLS);
@@ -3127,9 +3169,9 @@ ri_FastPathBatchFlush(RI_FastPathEntry *fpentry, Relation fk_rel,
 
 	/*
 	 * Begin the scan under the switched user id, so that any access method
-	 * code invoked by index_beginscan() runs as the PK relation's owner.  For
-	 * btree this has no functional consequence, but it keeps the ordering
-	 * correct for out-of-tree access methods.
+	 * code invoked by index_beginscan() runs as pg_ri_check.  For btree this
+	 * has no functional consequence, but it keeps the ordering correct for
+	 * out-of-tree access methods.
 	 */
 	scandesc = index_beginscan(pk_rel, idx_rel, false, snapshot, NULL,
 							   riinfo->nkeys, 0, SO_NONE);
@@ -3141,6 +3183,12 @@ ri_FastPathBatchFlush(RI_FastPathEntry *fpentry, Relation fk_rel,
 		ri_populate_fastpath_metadata(riinfo, fk_rel, idx_rel);
 	}
 	Assert(riinfo->fpmeta);
+
+	/*
+	 * Function permissions are re-checked on every flush, so revocations take
+	 * effect between batches.
+	 */
+	ri_CheckFunctionPermissions(riinfo, riinfo->fpmeta);
 
 	/*
 	 * Take our own reference to the metadata for the duration of the flush.
@@ -3617,27 +3665,21 @@ ri_check_fastpath_index(RI_ConstraintInfo *riinfo,
 /*
  * ri_CheckPermissions
  *		Check permissions for the SELECT ... FOR KEY SHARE used by the SPI
- *		path, as the referenced table's owner.
+ *		path.
  *
  * Go through ExecCheckPermissions() with a manufactured range table so that
  * ExecutorCheckPerms_hook gets control, as it does for the query the SPI
- * path executes.
+ * path executes.  The relation is checked as its owner, matching the
+ * checkAsUser stamp ri_ParserSetup arranges for the SPI query's RTE.
  */
 static void
 ri_CheckPermissions(const RI_ConstraintInfo *riinfo, Relation query_rel)
 {
-	AclResult	aclresult;
 	AclMode		requiredPerms = ACL_SELECT | ACL_SELECT_FOR_UPDATE;
 	RangeTblEntry *rte;
 	RTEPermissionInfo *perminfo;
 
-	/* USAGE on schema. */
-	aclresult = object_aclcheck(NamespaceRelationId,
-								RelationGetNamespace(query_rel),
-								GetUserId(), ACL_USAGE);
-	if (aclresult != ACLCHECK_OK)
-		aclcheck_error(aclresult, OBJECT_SCHEMA,
-					   get_namespace_name(RelationGetNamespace(query_rel)));
+	Assert(GetUserId() == ROLE_PG_RI_CHECK);
 
 	/*
 	 * SELECT is needed only on the referenced key columns.  FOR KEY SHARE
@@ -3647,6 +3689,7 @@ ri_CheckPermissions(const RI_ConstraintInfo *riinfo, Relation query_rel)
 	perminfo = makeNode(RTEPermissionInfo);
 	perminfo->relid = RelationGetRelid(query_rel);
 	perminfo->requiredPerms = requiredPerms;
+	perminfo->checkAsUser = RelationGetForm(query_rel)->relowner;
 	for (int i = 0; i < riinfo->nkeys; i++)
 	{
 		int			attno = riinfo->pk_attnums[i] - FirstLowInvalidHeapAttributeNumber;
@@ -3723,13 +3766,13 @@ recheck_matched_pk_tuple(Relation idxrel, ScanKeyData *skeys, int nkeys,
 /*
  * ri_CheckFunctionPermissions
  *		Check EXECUTE privilege on the functions the fast path invokes on the
- *		FK values, as the referenced table's owner.
+ *		FK values, as the current user (pg_ri_check).
  *
  * This parallels the checks ExecInitFunc() performs when the SPI path
  * initializes its generated query, where the equality operator's function
  * appears in the WHERE clause and the cast function, if any, in the cast
- * applied to the parameter.  Call with the user id already switched to the
- * referenced table's owner.
+ * applied to the parameter.  Call with the user id already switched to
+ * pg_ri_check.
  */
 static void
 ri_CheckFunctionPermissions(const RI_ConstraintInfo *riinfo,
@@ -4201,30 +4244,40 @@ ri_FetchPreparedPlan(RI_QueryKey *key)
 
 
 /*
- * ri_HashPreparedPlan -
+ * ri_GetQueryHashEntry -
  *
- * Add another plan to our private SPI query plan hashtable.
+ * Find or create the hashtable entry for a query key.
  */
-static void
-ri_HashPreparedPlan(RI_QueryKey *key, SPIPlanPtr plan)
+static RI_QueryHashEntry *
+ri_GetQueryHashEntry(RI_QueryKey *key)
 {
 	RI_QueryHashEntry *entry;
 	bool		found;
 
-	/*
-	 * On the first call initialize the hashtable
-	 */
 	if (!ri_query_cache)
 		ri_InitHashTables();
 
-	/*
-	 * Add the new plan.  We might be overwriting an entry previously found
-	 * invalid by ri_FetchPreparedPlan.
-	 */
 	entry = (RI_QueryHashEntry *) hash_search(ri_query_cache,
 											  key,
 											  HASH_ENTER, &found);
-	Assert(!found || entry->plan == NULL);
+	if (!found)
+	{
+		entry->plan = NULL;
+		entry->pk_relid = InvalidOid;
+		entry->nargs = 0;
+	}
+	return entry;
+}
+
+/*
+ * ri_HashPreparedPlan -
+ *
+ * Store the plan in its query hash entry, obtained via ri_GetQueryHashEntry.
+ */
+static void
+ri_HashPreparedPlan(RI_QueryHashEntry *entry, SPIPlanPtr plan)
+{
+	Assert(entry->plan == NULL);
 	entry->plan = plan;
 }
 
