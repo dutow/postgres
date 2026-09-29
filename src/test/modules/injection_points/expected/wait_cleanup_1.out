@@ -54,10 +54,10 @@ step terminate3:
 	SELECT pg_sleep(0.1);
  <waiting ...>
 step wait1: <... completed>
-FATAL:  terminating connection due to administrator command
 server closed the connection unexpectedly
 	This probably means the server terminated abnormally
 	before or while processing the request.
+invalid socket
 
 step terminate3: <... completed>
 pg_terminate_backend

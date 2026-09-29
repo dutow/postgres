@@ -35,9 +35,23 @@ step cancel3	{
 	SELECT pg_cancel_backend(pid) FROM pg_stat_activity
 	  WHERE wait_event = 'injection-points-wait';
 }
+# The pg_sleep() keeps isolationtester busy on s3's socket while s1's
+# backend reports its FATAL and exits.  A backend does not close its
+# socket; process exit does, and on Windows that is an abortive close
+# whose RST makes the client's network stack discard anything it has
+# received but not yet read.  Leaving s1's socket unread until the
+# backend is gone therefore costs us the FATAL, and the step completes
+# with a connection error instead -- see wait_cleanup_1.out.
+#
+# Without the sleep, which outcome we get depends on whether the tester
+# happens to be looking at s1 at the right moment, so the alternative
+# output is almost never exercised.  A sleep that turns out to be too
+# short on some machine is harmless: the FATAL arrives in time and the
+# normal output applies.
 step terminate3	{
 	SELECT pg_terminate_backend(pid) FROM pg_stat_activity
 	  WHERE wait_event = 'injection-points-wait';
+	SELECT pg_sleep(0.1);
 }
 step wakeup3	{ SELECT injection_points_wakeup('injection-points-wait'); }
 step detach3	{ SELECT injection_points_detach('injection-points-wait'); }
