@@ -1,0 +1,467 @@
+# Reproduces the ORIGINAL 2022 buildfarm failure in the stock, unmodified
+# in-core test -- commit_ts/002_standby.pl dying with "standby never caught up"
+# at line 51, exactly as it did on drongo, fairywren, jacana and tern.
+#
+# That failure is what caused 29992a6a509 to revert the Windows graceful
+# shutdown.  The hang is the SECOND libpqsrv_get_result() in
+# libpqrcv_receive()'s end-of-stream path, waiting with timeout 0 on a fresh
+# event handle after the one-shot FD_CLOSE was consumed by an earlier wakeup.
+#
+# Three conditions must hold at once.  Getting only some of them is why ~390
+# stock test runs across master and REL_17 stayed green before this:
+#
+#   (A) libpq still needs bytes, so PQisBusy() is true and the second
+#       get_result actually waits.  Already true in stock PostgreSQL: the
+#       walsender's own "if (got_STOPPING) proc_exit(0)" skips ReadyForQuery.
+#       No hook needed.
+#
+#   (B) the FD_CLOSE is consumed by an EARLIER wakeup.  Supplied by a
+#       pg_usleep before WaitForMultipleObjects() in WaitEventSetWaitBlock(),
+#       gated on MyBackendType == B_WAL_RECEIVER.  It has to exceed the
+#       walsender's write->exit gap: proc_exit(0) does real work (slot
+#       release and so on) before the FIN goes out, and a sleep shorter than
+#       that lets the walreceiver wake in between, so the FIN lands on the
+#       hang site's own handle and wakes it.  200ms was too short on the
+#       laptop; 300ms is enough on windows-2022 and reproduces at 300, 500
+#       and 1000.
+#
+#   (C) the close is GRACEFUL.  This is the one that is easy to miss.  With
+#       default settings the standby sends periodic feedback that the
+#       walsender never reads, and closesocket() on a socket with unread
+#       input makes Windows send an RST.  FD_CLOSE then carries a non-zero
+#       iErrorCode and every later recv() fails, so the peer notices without
+#       needing an event at all:
+#
+#         feedback on  (default):  FD_CLOSE closeerr=10053  (WSAECONNABORTED)
+#         feedback off:            FD_CLOSE closeerr=0      (graceful)
+#
+#       So reverting 29992a6a509 by itself does NOT give a graceful close on
+#       this path.  wal_receiver_status_interval=0 is what makes it graceful
+#       here, injected through TEMP_CONFIG, which PostgreSQL::Test::Cluster
+#       slurps into every test cluster -- so the tests stay unmodified.
+#       BE PRECISE ABOUT THIS ON-LIST.  The GUC is not new and had this same
+#       10s default in 2022, and neither Cluster.pm nor 002_standby.pl sets
+#       it -- so the buildfarm animals got a graceful close WITH feedback
+#       enabled at that default.  This machine does not: it gives
+#       closeerr=10053 every time.  That is consistent rather than
+#       contradictory, since at a 10s interval most closes have no feedback in
+#       flight, but it means this GUC is manufacturing the condition rather
+#       than reproducing their configuration.  The mechanism is faithful --
+#       same hang site, same event trace, same failure message -- but two of
+#       the three conditions are manufactured, not natural.
+#
+# A fourth leg, proposed-nopeek-nosleep, drops condition (B) and asks whether
+# this runner is already slow enough on its own.  If it reproduces the hang,
+# the whole thing needs no code patch beyond the two reverts.  It is an
+# experiment rather than an assertion, so it never fails the run.
+#
+# PG_TEST_USE_UNIX_SOCKETS is deliberately unset: the local reproduction was
+# over TCP, as the 2022 buildfarm animals were.
+
+name: Walreceiver 2022 regression repro (stock test)
+
+on:
+  workflow_dispatch:
+    inputs:
+      presleep_ms:
+        description: 'PG_WALRCV_PRESLEEP_MS (must exceed the walsender write->exit gap)'
+        required: false
+        default: '300'
+      repeat:
+        description: 'meson test --repeat'
+        required: false
+        default: '3'
+  push:
+    branches:
+      - win32-walrcv-2022-repro
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: 2022 repro - ${{ matrix.variant }}
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Untouched master, no repro conditions at all.  Shows the stock
+          # test is sound and does not report a hang where there is none.
+          - variant: master
+            revert_graceful: false
+            revert_peek: false
+            temp_config: false
+            presleep: false
+            expect: pass
+          # The proposed tree -- 29992a6a509 reverted -- with every repro
+          # condition applied.  Must still pass, because a8458f508a7 is
+          # present and its MSG_PEEK finds the pending EOF before sleeping.
+          - variant: proposed
+            revert_graceful: true
+            revert_peek: false
+            temp_config: true
+            presleep: true
+            expect: pass
+          # The same, minus a8458f508a7.  Must FAIL with "standby never caught
+          # up": this is the 2022 regression itself.  Its result is inverted,
+          # so a green leg means the hang was reproduced.
+          - variant: proposed-nopeek
+            revert_graceful: true
+            revert_peek: true
+            temp_config: true
+            presleep: true
+            expect: fail
+          # EXPERIMENT, not an assertion.  Same as the leg above but with no
+          # pre-sleep: only the two reverts and the two GUCs, no code patch
+          # beyond the reverts themselves.
+          #
+          # The pre-sleep exists to compensate for a fast machine.  This
+          # runner class is demonstrably slower -- the connect-path reproducer
+          # hangs on its first attempt here versus about 1.6% of attempts on
+          # the laptop -- so the walreceiver may already be late enough on its
+          # own.  If this leg reproduces the hang, the whole thing needs no
+          # code change at all, which is a far better artifact.
+          #
+          # We cannot predict it, so this leg never fails the run: it reports
+          # its answer and exits 0 either way.
+          - variant: proposed-nopeek-nosleep
+            revert_graceful: true
+            revert_peek: true
+            temp_config: true
+            presleep: false
+            expect: unknown
+
+    env:
+      TAR: "c:/windows/system32/tar.exe"
+      VARIANT: ${{ matrix.variant }}
+      EXPECT: ${{ matrix.expect }}
+      PRESLEEP_ON: ${{ matrix.presleep }}
+      PRESLEEP_INPUT: ${{ github.event.inputs.presleep_ms }}
+      REPEAT_INPUT: ${{ github.event.inputs.repeat }}
+      # Both tests that failed on the buildfarm in 2022.  The module was
+      # called "committs" then.
+      TESTS: commit_ts/002_standby commit_ts/003_standby_2
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Disable Windows Defender
+        shell: pwsh
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true -SubmitSamplesConsent NeverSend -MAPSReporting Disable
+
+      - uses: actions/checkout@v6
+        with:
+          # Full history: the reverts resolve 29992a6a509 and a8458f508a7.
+          fetch-depth: 0
+
+      # Robocopy does not copy ACLs and pg_ctl drops admin privileges via
+      # CreateRestrictedProcess, so without an explicit grant the postmaster
+      # hits "PANIC: could not open file global/pg_control: Permission denied".
+      - name: Grant workspace ACL to runner user
+        shell: pwsh
+        run: |
+          icacls "${{ github.workspace }}" /grant "${env:USERNAME}:(OI)(CI)F" /Q | Out-Null
+
+      - name: Install dependencies, Mingw
+        shell: 'C:\msys64\usr\bin\bash.exe --login -eo pipefail "{0}"'
+        run: |
+          pacman -S --noconfirm --needed --asdeps \
+            bison flex
+          echo C:/msys64/usr/bin >> "$GITHUB_PATH"
+          # Don't prefer mingw's perl
+          echo C:/Strawberry/perl/bin >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          echo ::group::pip
+          python -m pip install --upgrade meson
+          if (!$?) { throw 'cmdfail' }
+          echo ::endgroup::
+
+          # Pin IPC::Run.  Newer releases made binmode the default on Win32,
+          # which appends a stray CR to every safe_psql() result.  That makes
+          # 002_standby.pl die with the IDENTICAL "standby never caught up"
+          # message for a completely unrelated reason -- it cost an hour of
+          # chasing a false positive locally, so do not unpin this.
+          echo ::group::cpan_ipc_run
+          "o conf recommends_policy 0`no conf commit`nnotest install NJM/IPC-Run-20250809.0.tar.gz" | cpan
+          if (!$?) { throw 'cmdfail' }
+          perl -mIPC::Run -e 1
+          if (!$?) { throw 'cmdfail' }
+          echo ::endgroup::
+
+      # Condition (C), part one: restore shutdown(SD_SEND) + closesocket().
+      - name: Revert 29992a6a509 (graceful shutdown)
+        if: matrix.revert_graceful
+        shell: bash
+        run: |
+          set -eu
+          git revert -n 29992a6a509
+          n=$(grep -c 'closesocket(MyProcPort->sock)' src/backend/libpq/pqcomm.c || true)
+          echo "closesocket() calls in pqcomm.c: $n"
+          if [ "$n" -eq 0 ]; then
+            echo "::error::graceful shutdown was not restored"
+            exit 1
+          fi
+
+      # Remove the mitigation.  a8458f508a7 landed in latch.c and the code has
+      # since moved to waiteventset.c, so a plain git revert conflicts on
+      # master; retarget the path and apply the commit in reverse.
+      - name: Revert a8458f508a7 (MSG_PEEK fix)
+        if: matrix.revert_peek
+        shell: bash
+        run: |
+          set -eu
+          f=src/backend/storage/ipc/waiteventset.c
+          before=$(grep -c MSG_PEEK "$f" || true)
+          if [ "$before" -eq 0 ]; then
+            echo "::error::MSG_PEEK not present before the revert"
+            exit 1
+          fi
+          git show a8458f508a7 -- src/backend/storage/ipc/latch.c \
+            | sed 's|src/backend/storage/ipc/latch\.c|src/backend/storage/ipc/waiteventset.c|g' \
+            | git apply -R -3 -
+          after=$(grep -c MSG_PEEK "$f" || true)
+          echo "MSG_PEEK occurrences: $before -> $after"
+          if [ "$after" -ne 0 ]; then
+            echo "::error::MSG_PEEK still present after the revert"
+            exit 1
+          fi
+
+      # One patch, applied to every leg.  It adds two things:
+      #
+      #  - the pre-sleep, condition (B).  Inert unless
+      #    PG_WALRCV_PRESLEEP_MS is set, which only the pre-sleep legs do, so
+      #    there is nothing to select here.
+      #  - tracing.  "standby never caught up" is not a usable signal on its
+      #    own: the hang, the IPC::Run carriage-return bug and plain
+      #    throttling all produce it, and two CI rounds were misread before
+      #    this was added.  A wedged walreceiver's last trace line is
+      #    "get_result: busy, entering untimed wait", and nothing else
+      #    produces that.
+      - name: Apply the repro patch
+        shell: bash
+        run: |
+          set -eu
+          git apply .github/walrcv-repro.patch
+          echo "trace hunks   : $(grep -c WRCVTRACE src/backend/storage/ipc/waiteventset.c || true)"
+          echo "pre-sleep hunk: $(grep -c PG_WALRCV_PRESLEEP_MS src/backend/storage/ipc/waiteventset.c || true)"
+
+      # Condition (C), part two: no standby feedback, so the walsender has no
+      # unread input and its close is genuinely graceful rather than an RST.
+      - name: Adversarial test configuration
+        if: matrix.temp_config
+        shell: bash
+        run: |
+          set -eu
+          cfg="$(pwd -W 2>/dev/null || pwd)/temp-config.conf"
+          # hot_standby_feedback is already off by default, so this is the
+          # only setting that matters.
+          echo "wal_receiver_status_interval = 0" > "$cfg"
+          echo "TEMP_CONFIG=$cfg" >> "$GITHUB_ENV"
+          cat "$cfg"
+
+      - name: Confirm the build configuration
+        shell: bash
+        run: |
+          echo "variant=$VARIANT expect=$EXPECT presleep_on=$PRESLEEP_ON"
+          echo "closesocket in pqcomm.c  : $(grep -c 'closesocket(MyProcPort->sock)' src/backend/libpq/pqcomm.c || true)"
+          echo "MSG_PEEK in waiteventset : $(grep -c MSG_PEEK src/backend/storage/ipc/waiteventset.c || true)"
+          echo "pre-sleep hunk           : $(grep -c PG_WALRCV_PRESLEEP_MS src/backend/storage/ipc/waiteventset.c || true)"
+          git --no-pager diff HEAD --stat
+
+      - name: Configure
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson setup ^
+            --backend ninja ^
+            -Dauto_features=disabled ^
+            -Dcassert=true ^
+            -Dinjection_points=true ^
+            -Dtap_tests=enabled ^
+            --buildtype debug ^
+            -DTAR=${{env.TAR}} ^
+            build
+
+      - name: Build
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          ninja -C build all testprep || exit 1
+
+      # Creates build/tmp_install and the initdb template that
+      # PostgreSQL::Test::Cluster->init() robocopies from.  Without it every
+      # TAP test dies in under a second.
+      - name: Prepare test install
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson test --no-rebuild -C build --suite setup --logbase setup
+
+      - name: Run the stock 2022 tests
+        shell: bash
+        run: |
+          set -u
+          # 300ms, measured on windows-2022: still reproduces the hang (wedged=1
+          # at 300, 500 and 1000), while 1000 throttled the proposed leg into a
+          # 508s timeout where 300 runs it clean in 43s.
+          presleep="${PRESLEEP_INPUT:-}"
+          [ -n "$presleep" ] || presleep=300
+          rep="${REPEAT_INPUT:-}"
+          [ -n "$rep" ] || rep=3
+
+          if [ "$PRESLEEP_ON" = "true" ]; then
+            export PG_WALRCV_PRESLEEP_MS="$presleep"
+          fi
+          # The pre-sleep slows reconnection badly on a runner whose baseline
+          # run is 4-6s.  At 120s a merely slow reconnect timed out and looked
+          # like a failure: the trace showed the last event was an ABORTIVE
+          # close on a connect socket (FD_CONNECT|FD_CLOSE, closeerr=10053),
+          # not a wedged walreceiver.  Give those legs room.  A real hang is
+          # still identified by the trace rather than by the timeout.
+          if [ "$PRESLEEP_ON" = "true" ]; then
+            export PG_TEST_TIMEOUT_DEFAULT=300
+          else
+            export PG_TEST_TIMEOUT_DEFAULT=120
+          fi
+
+          echo "variant=$VARIANT expect=$EXPECT"
+          echo "PG_WALRCV_PRESLEEP_MS=${PG_WALRCV_PRESLEEP_MS:-<unset>}"
+          echo "TEMP_CONFIG=${TEMP_CONFIG:-<unset>}"
+          echo "tests=$TESTS repeat=$rep"
+
+          set +e
+          # --num-processes 1 is required with --repeat: parallel copies of one
+          # test share build/testrun/<suite>/<test>/ and testwrap's rmtree
+          # deletes a live cluster's data directory out from under it.
+          meson test --print-errorlogs --no-rebuild \
+            --num-processes 1 --repeat "$rep" --timeout-multiplier 4 \
+            -C build $TESTS 2>&1 | tee run.out
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "meson exit code: $rc"
+
+          # Verdict from meson's machine-readable log rather than the console.
+          #
+          # Count EVERY result type.  A hang does not show up as FAIL: the TAP
+          # test dies from its catchup timeout with exit 9, which meson reports
+          # as ERROR.  Counting only OK and FAIL silently discards every hang.
+          stats=$(perl -MJSON::PP -e '
+            my %n;
+            if (open(my $fh, "<", "build/meson-logs/testlog.json")) {
+              while (my $l = <$fh>) {
+                my $r = eval { decode_json($l) };
+                next unless ref($r) eq "HASH" && defined $r->{name};
+                next unless $r->{name} =~ /00[23]_standby/;
+                $n{$r->{result} // "UNKNOWN"}++;
+              }
+            }
+            my $ok = $n{OK} // 0;
+            my $bad = 0;
+            $bad += $n{$_} // 0 for qw(FAIL ERROR TIMEOUT);
+            my $detail = join(",", map { "$_=$n{$_}" } sort keys %n) || "none";
+            print "$ok $bad $detail";
+          ')
+          ok=$(echo "$stats" | cut -d' ' -f1)
+          bad=$(echo "$stats" | cut -d' ' -f2)
+          detail=$(echo "$stats" | cut -d' ' -f3-)
+          echo "tally: ok=$ok bad=$bad ($detail)"
+
+          # A genuine hit says "standby never caught up".  The IPC::Run CR bug
+          # produces the SAME message, so check that it is absent before
+          # believing a failure.
+          # grep exits 1 when it finds nothing, and this shell runs with
+          # "set -eo pipefail", so an unguarded grep kills the step in exactly
+          # the good case.  Swallow the status explicitly.
+          crbug=$({ grep -rl "invalid input syntax for type pg_lsn" build/testrun/ 2>/dev/null || true; } | wc -l)
+          caught=$({ grep -rl "standby never caught up" build/testrun/ 2>/dev/null || true; } | wc -l)
+          # The decisive one.  A walreceiver wedged in the untimed wait logs
+          # that line and then nothing, so it is the LAST trace line in the
+          # standby's log.  Throttling never produces that.
+          wedged=0
+          for lf in $({ find build/testrun -name '*standby*.log' 2>/dev/null || true; }); do
+            last=$({ grep -h "WRCVTRACE" "$lf" 2>/dev/null || true; } | tail -1)
+            case "$last" in
+              *"entering untimed wait"*) wedged=1 ;;
+            esac
+          done
+          echo "signatures: 'standby never caught up' in $caught file(s); pg_lsn CR bug in $crbug file(s); wedged walreceiver: $wedged"
+          echo "--- last trace lines ---"
+          for lf in $({ find build/testrun -name '*standby*.log' 2>/dev/null || true; }); do
+            { grep -h "WRCVTRACE" "$lf" 2>/dev/null || true; } | tail -3
+          done
+          echo "------------------------"
+          if [ "$crbug" -ne 0 ]; then
+            echo "::error::$VARIANT: the IPC::Run carriage-return bug is present, so every result here is meaningless. Check the IPC::Run pin."
+            exit 1
+          fi
+
+          if [ "$EXPECT" = "unknown" ]; then
+            # Exploratory leg: report, never fail the run.
+            if [ "$bad" -gt 0 ] && [ "$wedged" -eq 1 ]; then
+              echo "::notice::$VARIANT: the 2022 hang REPRODUCED WITHOUT the pre-sleep ($bad of $((ok+bad)) runs). This runner is slow enough on its own, so the reproduction needs no code patch beyond the two reverts."
+            elif [ "$bad" -gt 0 ]; then
+              echo "::notice::$VARIANT: $bad run(s) failed but no walreceiver was wedged in the untimed wait, so this is not the hang. Check the artifacts."
+            else
+              echo "::notice::$VARIANT: no hang without the pre-sleep ($ok run(s) passed). The pre-sleep is doing real work on this runner, not just on the laptop."
+            fi
+            exit 0
+          fi
+
+          if [ "$EXPECT" = "pass" ]; then
+            # Assert on the hazard, not on the clock.
+            #
+            # What this leg claims is "no walreceiver wedges when
+            # a8458f508a7 is present" -- not "the test finishes in time".  The
+            # pre-sleep throttles every wait, so on a runner whose baseline run
+            # is 4-6s a merely slow run can blow the timeout while nothing is
+            # wrong.  That happened twice, with the trace showing an abortive
+            # close on a connect socket rather than a wedge.
+            #
+            # So on a pre-sleep leg a timeout with wedged=0 is reported and
+            # tolerated.  On a leg without the pre-sleep there is no throttling
+            # to excuse it, so any failure is still fatal.
+            if [ "$wedged" -eq 1 ]; then
+              echo "::error::$VARIANT: a walreceiver was wedged in the untimed wait ($detail). a8458f508a7 is present here, so that would mean the fix does not protect this path. Check the artifacts."
+              exit 1
+            fi
+            if [ "$bad" -eq 0 ]; then
+              echo "$VARIANT: all $ok run(s) passed, as expected."
+              exit 0
+            fi
+            if [ "$PRESLEEP_ON" = "true" ]; then
+              echo "::warning::$VARIANT: $bad of $((ok+bad)) run(s) timed out ($detail) but NO walreceiver was wedged, so the hazard did not occur. This is the pre-sleep throttling the run, not a regression. Lower presleep_ms to reduce it."
+              exit 0
+            fi
+            echo "::error::$VARIANT: $bad of $((ok+bad)) run(s) did not pass ($detail) with no pre-sleep to excuse it."
+            exit 1
+          fi
+
+          # expect=fail: a hang, and only a hang, counts.
+          if [ "$bad" -gt 0 ] && [ "$wedged" -eq 1 ]; then
+            echo "$VARIANT: $bad of $((ok+bad)) run(s) hung, as expected -- the 2022 regression reproduced."
+            exit 0
+          fi
+          if [ "$bad" -gt 0 ]; then
+            echo "::error::$VARIANT: $bad run(s) failed but no walreceiver was wedged in the untimed wait ($detail). Slowness or infrastructure, not the hazard."
+            exit 1
+          fi
+          echo "::error::$VARIANT: no run failed, i.e. the 2022 hang did NOT reproduce."
+          echo "Most likely the pre-sleep ($presleep ms) is shorter than this runner's walsender write->exit gap. Re-run with a larger presleep_ms."
+          exit 1
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: walrcv-2022-repro-${{ matrix.variant }}
+          path: |
+            build/testrun/
+            build/meson-logs/
+            run.out
+          if-no-files-found: warn

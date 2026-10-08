@@ -1,0 +1,111 @@
+diff --git a/src/backend/replication/libpqwalreceiver/libpqwalreceiver.c b/src/backend/replication/libpqwalreceiver/libpqwalreceiver.c
+index 029990d9fce..4d76c7fbed2 100644
+--- a/src/backend/replication/libpqwalreceiver/libpqwalreceiver.c
++++ b/src/backend/replication/libpqwalreceiver/libpqwalreceiver.c
+@@ -849,15 +849,21 @@ libpqrcv_receive(WalReceiverConn *conn, char **buffer,
+ 	{
+ 		PGresult   *res;
+ 
++		elog(LOG, "WRCVTRACE receive: rawlen=-1, entering end-of-stream path");
+ 		res = libpqsrv_get_result(conn->streamConn,
+ 								  WAIT_EVENT_LIBPQWALRECEIVER_RECEIVE);
++		elog(LOG, "WRCVTRACE receive: FIRST get_result -> %s",
++			 res ? PQresStatus(PQresultStatus(res)) : "NULL");
+ 		if (PQresultStatus(res) == PGRES_COMMAND_OK)
+ 		{
+ 			PQclear(res);
+ 
++			elog(LOG, "WRCVTRACE receive: calling SECOND get_result (the 2022 hang site)");
+ 			/* Verify that there are no more results. */
+ 			res = libpqsrv_get_result(conn->streamConn,
+ 									  WAIT_EVENT_LIBPQWALRECEIVER_RECEIVE);
++			elog(LOG, "WRCVTRACE receive: SECOND get_result -> %s",
++				 res ? PQresStatus(PQresultStatus(res)) : "NULL");
+ 			if (res != NULL)
+ 			{
+ 				PQclear(res);
+diff --git a/src/backend/storage/ipc/waiteventset.c b/src/backend/storage/ipc/waiteventset.c
+index 5c807c3b274..ac470431ee1 100644
+--- a/src/backend/storage/ipc/waiteventset.c
++++ b/src/backend/storage/ipc/waiteventset.c
+@@ -1687,6 +1687,26 @@ WaitEventSetWaitBlock(WaitEventSet *set, int cur_timeout,
+ 		}
+ 	}
+ 
++	/*
++	 * REPRO ONLY, not for commit.  Sleep while this handle is armed, so a peer
++	 * that writes and then closes gracefully has time to do both: the FIN is
++	 * latched here and consumed by the WSAEnumNetworkEvents() call below,
++	 * leaving the next WaitLatchOrSocket()'s fresh handle nothing to wake it.
++	 */
++	if (MyBackendType == B_WAL_RECEIVER)
++	{
++		static int	presleep_ms = -1;
++
++		if (presleep_ms < 0)
++		{
++			const char *s = getenv("PG_WALRCV_PRESLEEP_MS");
++
++			presleep_ms = s ? atoi(s) : 0;
++		}
++		if (presleep_ms > 0)
++			pg_usleep(presleep_ms * 1000L);
++	}
++
+ 	/*
+ 	 * Sleep.
+ 	 *
+@@ -1776,6 +1796,14 @@ WaitEventSetWaitBlock(WaitEventSet *set, int cur_timeout,
+ 			if (WSAEnumNetworkEvents(cur_event->fd, handle, &resEvents) != 0)
+ 				elog(ERROR, "failed to enumerate network events: error code %d",
+ 					 WSAGetLastError());
++			if (MyBackendType == B_WAL_RECEIVER)
++				elog(LOG, "WRCVTRACE enum fd=%d events=0x%lx%s%s%s closeerr=%d",
++					 (int) cur_event->fd,
++					 (unsigned long) resEvents.lNetworkEvents,
++					 (resEvents.lNetworkEvents & FD_READ) ? " FD_READ" : "",
++					 (resEvents.lNetworkEvents & FD_WRITE) ? " FD_WRITE" : "",
++					 (resEvents.lNetworkEvents & FD_CLOSE) ? " FD_CLOSE" : "",
++					 resEvents.iErrorCode[FD_CLOSE_BIT]);
+ 			if ((cur_event->events & WL_SOCKET_READABLE) &&
+ 				(resEvents.lNetworkEvents & FD_READ))
+ 			{
+diff --git a/src/include/libpq/libpq-be-fe-helpers.h b/src/include/libpq/libpq-be-fe-helpers.h
+index b0949280ce0..0f2cd149e55 100644
+--- a/src/include/libpq/libpq-be-fe-helpers.h
++++ b/src/include/libpq/libpq-be-fe-helpers.h
+@@ -347,16 +347,19 @@ libpqsrv_get_result(PGconn *conn, uint32 wait_event_info)
+ 	 * Collect data until PQgetResult is ready to get the result without
+ 	 * blocking.
+ 	 */
++	elog(LOG, "WRCVTRACE get_result: enter, PQisBusy=%d", PQisBusy(conn));
+ 	while (PQisBusy(conn))
+ 	{
+ 		int			rc;
+ 
++		elog(LOG, "WRCVTRACE get_result: busy, entering untimed wait");
+ 		rc = WaitLatchOrSocket(MyLatch,
+ 							   WL_EXIT_ON_PM_DEATH | WL_LATCH_SET |
+ 							   WL_SOCKET_READABLE,
+ 							   PQsocket(conn),
+ 							   0,
+ 							   wait_event_info);
++		elog(LOG, "WRCVTRACE get_result: wait returned rc=0x%x", rc);
+ 
+ 		/* Interrupted? */
+ 		if (rc & WL_LATCH_SET)
+@@ -368,10 +371,14 @@ libpqsrv_get_result(PGconn *conn, uint32 wait_event_info)
+ 		/* Consume whatever data is available from the socket */
+ 		if (PQconsumeInput(conn) == 0)
+ 		{
++			elog(LOG, "WRCVTRACE get_result: PQconsumeInput=0 (EOF or error): %s",
++				 PQerrorMessage(conn));
+ 			/* trouble; expect PQgetResult() to return NULL */
+ 			break;
+ 		}
++		elog(LOG, "WRCVTRACE get_result: consumed ok");
+ 	}
++	elog(LOG, "WRCVTRACE get_result: loop done");
+ 
+ 	/* Now we can collect and return the next PGresult */
+ 	return PQgetResult(conn);
