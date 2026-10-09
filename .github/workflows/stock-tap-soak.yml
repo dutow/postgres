@@ -1,0 +1,417 @@
+# Does the lost-FD_CLOSE walreceiver hang show up in *stock* in-core TAP
+# tests on a GitHub Actions Windows runner?
+#
+# Background.  On Windows, Winsock signals FD_CLOSE only once for a graceful
+# close, while PostgreSQL builds a fresh event handle for every
+# WaitLatchOrSocket() call, so a walreceiver can sleep forever in
+# libpqsrv_connect_params().  a8458f508a7 closed that race with a pre-sleep
+# MSG_PEEK.  29992a6a509 is the 2022 revert of graceful shutdown; undoing it
+# is what lets a real backend produce a graceful mid-message close, which is
+# what makes the hazard reachable at all.
+#
+# On a laptop the hazard is ~1.6% per connection attempt and stock tests never
+# caught it: commit_ts/002_standby.pl stayed clean over 8 runs and ~1500
+# iterations of restart/terminate stress produced nothing.  But on this runner
+# class the purpose-built reproducer hangs on the *first* attempt, so the
+# stock tests may well be sensitive enough here.  That is the question this
+# workflow exists to answer.
+#
+# A first pass with default settings found nothing: 129 runs of these tests on
+# a build with both commits reverted, zero failures, and 129 on control, also
+# zero.  So this pass tilts the odds in two ways that do not touch any test
+# file -- a TEMP_CONFIG that multiplies connection attempts inside the window
+# where mid-message closes actually happen, and deliberate CPU contention to
+# widen the scheduling gap the race depends on.  Both are applied to the
+# control legs too, so the comparison stays valid.
+#
+# Be precise about this when describing the result: these are unmodified
+# in-core tests, but they are NOT running in a default environment.
+#
+# READ THE RESULT THIS WAY:
+#   nopeek leg RED   -> a stock in-core test detected the hang.  That is the
+#                       interesting outcome, and the control leg says whether
+#                       to believe it.
+#   nopeek leg GREEN -> stock tests did not catch it even here, which is the
+#                       argument for shipping a purpose-built reproducer.
+#
+# The control legs run the same tests on untouched master.  Windows CI is
+# flaky enough that a red nopeek leg means nothing without them: if the same
+# test is also red on control, it is ambient flakiness, not this hazard.
+#
+# Deliberately NOT setting PG_TEST_USE_UNIX_SOCKETS, which upstream's own
+# windows-vs job does set.  The hazard is in the walreceiver's TCP socket, and
+# the buildfarm animals that saw the 2022 regression use TCP.  (It is worth
+# wondering whether upstream CI running over unix sockets is part of why this
+# is not seen there, but that is a hypothesis, not a finding.)
+
+name: Stock TAP soak (walreceiver lost-FD_CLOSE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      repeat_override:
+        description: 'Override the per-group repeat count (blank = per-group default)'
+        required: false
+        default: ''
+  push:
+    branches:
+      - win32-walrcv-stock-tap-soak
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: ${{ matrix.variant }} / ${{ matrix.group }}
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- both commits reverted: the configuration under test ---------
+          - variant: nopeek
+            group: commit_ts
+            tests: commit_ts/002_standby commit_ts/003_standby_2 commit_ts/004_restart
+            repeat: 15
+          - variant: nopeek
+            group: recovery-reconnect
+            tests: recovery/001_stream_rep recovery/004_timeline_switch recovery/025_stuck_on_old_timeline recovery/055_cascade_reconnect
+            repeat: 10
+          - variant: nopeek
+            group: recovery-restart
+            tests: recovery/019_replslot_limit recovery/031_recovery_conflict recovery/030_stats_cleanup_replica
+            repeat: 8
+          - variant: nopeek
+            group: subscription
+            tests: subscription/001_rep_changes subscription/004_sync
+            repeat: 10
+          # --- untouched master: the flakiness control ---------------------
+          - variant: control
+            group: commit_ts
+            tests: commit_ts/002_standby commit_ts/003_standby_2 commit_ts/004_restart
+            repeat: 15
+          - variant: control
+            group: recovery-reconnect
+            tests: recovery/001_stream_rep recovery/004_timeline_switch recovery/025_stuck_on_old_timeline recovery/055_cascade_reconnect
+            repeat: 10
+          - variant: control
+            group: recovery-restart
+            tests: recovery/019_replslot_limit recovery/031_recovery_conflict recovery/030_stats_cleanup_replica
+            repeat: 8
+          - variant: control
+            group: subscription
+            tests: subscription/001_rep_changes subscription/004_sync
+            repeat: 10
+
+    env:
+      TAR: "c:/windows/system32/tar.exe"
+      VARIANT: ${{ matrix.variant }}
+      GROUP: ${{ matrix.group }}
+      TESTS: ${{ matrix.tests }}
+      REPEAT: ${{ matrix.repeat }}
+      REPEAT_OVERRIDE: ${{ github.event.inputs.repeat_override }}
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Disable Windows Defender
+        shell: pwsh
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true -SubmitSamplesConsent NeverSend -MAPSReporting Disable
+
+      - uses: actions/checkout@v6
+        with:
+          # Full history: the nopeek legs resolve 29992a6a509 and a8458f508a7.
+          fetch-depth: 0
+
+      # Robocopy does not copy ACLs, and pg_ctl drops admin privileges via
+      # CreateRestrictedProcess, so without an explicit grant for the runner
+      # user the postmaster hits "PANIC: could not open file global/pg_control:
+      # Permission denied".
+      - name: Grant workspace ACL to runner user
+        shell: pwsh
+        run: |
+          icacls "${{ github.workspace }}" /grant "${env:USERNAME}:(OI)(CI)F" /Q | Out-Null
+
+      - name: Install dependencies, Mingw
+        shell: 'C:\msys64\usr\bin\bash.exe --login -eo pipefail "{0}"'
+        run: |
+          pacman -S --noconfirm --needed --asdeps \
+            bison flex
+          echo C:/msys64/usr/bin >> "$GITHUB_PATH"
+          # Don't prefer mingw's perl
+          echo C:/Strawberry/perl/bin >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          echo ::group::pip
+          python -m pip install --upgrade meson
+          if (!$?) { throw 'cmdfail' }
+          echo ::endgroup::
+
+          # Pin IPC::Run: newer releases made binmode the default on Win32,
+          # which appends a stray CR to every safe_psql() result and fails
+          # every PostgreSQL TAP test.  recommends_policy=0 keeps cpan from
+          # pulling in IO::Tty / IO::Pty, which don't build on Windows.
+          echo ::group::cpan_ipc_run
+          "o conf recommends_policy 0`no conf commit`nnotest install NJM/IPC-Run-20250809.0.tar.gz" | cpan
+          if (!$?) { throw 'cmdfail' }
+          perl -mIPC::Run -e 1
+          if (!$?) { throw 'cmdfail' }
+          echo ::endgroup::
+
+      # Put shutdown(SD_SEND) + closesocket() back into socket_close(), so a
+      # backend that dies mid-message closes gracefully instead of sending an
+      # RST.  Without this the hazard is not reachable from PostgreSQL at all.
+      - name: Revert 29992a6a509 (graceful shutdown)
+        if: matrix.variant == 'nopeek'
+        shell: bash
+        run: |
+          set -eu
+          git revert -n 29992a6a509
+          n=$(grep -c 'closesocket(MyProcPort->sock)' src/backend/libpq/pqcomm.c || true)
+          echo "closesocket() calls in pqcomm.c: $n"
+          if [ "$n" -eq 0 ]; then
+            echo "::error::graceful shutdown was not restored"
+            exit 1
+          fi
+
+      # Remove the pre-sleep MSG_PEEK.  a8458f508a7 landed in latch.c and the
+      # code has since moved to waiteventset.c, so a plain `git revert`
+      # conflicts; retarget the path and apply the commit in reverse.
+      - name: Revert a8458f508a7 (MSG_PEEK fix)
+        if: matrix.variant == 'nopeek'
+        shell: bash
+        run: |
+          set -eu
+          f=src/backend/storage/ipc/waiteventset.c
+          before=$(grep -c MSG_PEEK "$f" || true)
+          if [ "$before" -eq 0 ]; then
+            echo "::error::MSG_PEEK not present before the revert; nothing to undo"
+            exit 1
+          fi
+          git show a8458f508a7 -- src/backend/storage/ipc/latch.c \
+            | sed 's|src/backend/storage/ipc/latch\.c|src/backend/storage/ipc/waiteventset.c|g' \
+            | git apply -R -3 -
+          after=$(grep -c MSG_PEEK "$f" || true)
+          echo "MSG_PEEK occurrences: $before -> $after"
+          if [ "$after" -ne 0 ]; then
+            echo "::error::MSG_PEEK still present after the revert"
+            exit 1
+          fi
+
+      - name: Confirm the build configuration
+        shell: bash
+        run: |
+          echo "variant=$VARIANT"
+          echo "closesocket in pqcomm.c : $(grep -c 'closesocket(MyProcPort->sock)' src/backend/libpq/pqcomm.c || true)"
+          echo "MSG_PEEK in waiteventset: $(grep -c MSG_PEEK src/backend/storage/ipc/waiteventset.c || true)"
+          git --no-pager diff HEAD --stat
+
+      # Make the stock tests adversarial without editing a single test file.
+      #
+      # PostgreSQL::Test::Cluster slurps $TEMP_CONFIG into every test cluster's
+      # postgresql.conf, and does so *after* its own
+      # "wal_retrieve_retry_interval = '500ms'", so this overrides it.
+      #
+      # Why these three:
+      #   wal_retrieve_retry_interval - the dangerous event is not "a
+      #     connection attempt", it is "an attempt whose server response is cut
+      #     mid-message".  Those only happen while the primary is down or
+      #     starting up, so what matters is how many attempts land inside that
+      #     window.  At 500ms a restart yields about one; at 10ms it yields
+      #     tens.
+      #   wal_receiver_timeout / wal_sender_timeout - set to 0 so a wedged
+      #     walreceiver stays wedged instead of being killed and quietly
+      #     reconnecting, which would let a real hang pass as a slow test.
+      #
+      # Any test that cares sets these itself via append_conf after init(), so
+      # it still wins.  And both arms get the same treatment, so the control
+      # legs stay a valid comparison.
+      - name: Adversarial test configuration
+        shell: bash
+        run: |
+          set -eu
+          cfg="$(pwd -W 2>/dev/null || pwd)/temp-config.conf"
+          cat > "$cfg" <<'CONF'
+          wal_retrieve_retry_interval = '10ms'
+          wal_receiver_timeout = 0
+          wal_sender_timeout = 0
+          CONF
+          echo "TEMP_CONFIG=$cfg" >> "$GITHUB_ENV"
+          echo "TEMP_CONFIG=$cfg"
+          cat "$cfg"
+
+      - name: Configure
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson setup ^
+            --backend ninja ^
+            -Dauto_features=disabled ^
+            -Dcassert=true ^
+            -Dinjection_points=true ^
+            -Dtap_tests=enabled ^
+            --buildtype debug ^
+            -DTAR=${{env.TAR}} ^
+            build
+
+      - name: Build
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          ninja -C build all testprep || exit 1
+
+      # Creates build/tmp_install and the initdb template that
+      # PostgreSQL::Test::Cluster->init() robocopies from.  Skipping this makes
+      # every TAP test die in under a second.
+      - name: Prepare test install
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson test --no-rebuild -C build --suite setup --logbase setup
+
+      # Normal pass/fail semantics: a red leg means a stock test failed.  On a
+      # nopeek leg that is the finding; on a control leg it is flakiness.
+      - name: Soak
+        shell: bash
+        run: |
+          set -u
+          rep="$REPEAT"
+          if [ -n "${REPEAT_OVERRIDE:-}" ]; then rep="$REPEAT_OVERRIDE"; fi
+          echo "variant=$VARIANT group=$GROUP repeat=$rep"
+          echo "tests: $TESTS"
+          echo "TEMP_CONFIG=${TEMP_CONFIG:-<unset>}"
+
+          # Widen the race window.  The hang needs the FIN to be latched before
+          # the walreceiver's WSAEnumNetworkEvents() runs, so it depends on the
+          # client NOT being scheduled in the gap between the peer's write and
+          # its shutdown.  Scheduling pressure makes that gap easier to lose.
+          # This is the same reason the hazard is ~1.6% per attempt on a fast
+          # laptop but hit on the first attempt on this runner class.
+          #
+          # 3 spinners on a 4-vCPU runner: enough pressure to matter, enough
+          # headroom that the tests still make progress.  --timeout-multiplier
+          # is raised to compensate.
+          spin_pids=""
+          for _ in 1 2 3; do
+            ( while :; do :; done ) &
+            spin_pids="$spin_pids $!"
+          done
+          trap 'kill $spin_pids 2>/dev/null || true' EXIT
+          echo "cpu contention: 3 spinners ($spin_pids)"
+
+          # --num-processes 1 is required, not a preference.  meson's --repeat
+          # schedules N copies of each test, and with parallelism those copies
+          # run CONCURRENTLY WITH EACH OTHER while sharing a single
+          # build/testrun/<suite>/<test>/ directory.  src/tools/testwrap does
+          # shutil.rmtree(testdir) on startup, so iteration 2 deletes
+          # iteration 1's data directory out from under a live postmaster:
+          #   PermissionError: [WinError 32] ... used by another process
+          #   pg_ctl stop failed
+          # That is a harness collision, not a PostgreSQL bug, and it hits the
+          # control legs just as hard, which makes the whole run unreadable.
+          set +e
+          meson test --print-errorlogs --no-rebuild \
+            --num-processes 1 --repeat "$rep" --timeout-multiplier 4 \
+            -C build $TESTS 2>&1 | tee soak.out
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "meson exit code: $rc"
+          exit "$rc"
+
+      # Per-test tally, so a red leg says which test failed and how often
+      # rather than only that something did.
+      - name: Summarise
+        if: always()
+        shell: bash
+        run: |
+          set -u
+          perl -MJSON::PP -e '
+            my (%ok, %fail, %other);
+            if (open(my $fh, "<", "build/meson-logs/testlog.json")) {
+              while (my $l = <$fh>) {
+                my $r = eval { decode_json($l) };
+                next unless ref($r) eq "HASH" && defined $r->{name};
+                my $n = $r->{name};
+                my $v = $r->{result} // "";
+                if    ($v eq "OK")   { $ok{$n}++ }
+                elsif ($v eq "FAIL") { $fail{$n}++ }
+                else                 { $other{$n}{$v}++ }
+              }
+            }
+            my $tf = 0;
+            print "=== per-test tally ($ENV{VARIANT} / $ENV{GROUP}) ===\n";
+            for my $n (sort keys %{{ %ok, %fail, %other }}) {
+              my $f = $fail{$n} // 0;
+              $tf += $f;
+              printf("  %-58s ok=%-4d fail=%-4d%s\n", $n, $ok{$n} // 0, $f,
+                     $other{$n} ? "  other=" . join(",", map {"$_ x$other{$n}{$_}"} sort keys %{$other{$n}}) : "");
+            }
+            print "\n";
+            if ($tf == 0) {
+              print "No stock test failed on this leg.\n";
+              print "$ENV{VARIANT}: stock in-core tests did NOT detect the hang here.\n"
+                if $ENV{VARIANT} eq "nopeek";
+            } else {
+              print "$tf failing run(s).\n";
+              if ($ENV{VARIANT} eq "nopeek") {
+                print "A stock in-core test failed with both commits reverted.\n";
+                print "Compare against the control leg for the same group before concluding anything:\n";
+                print "  control green for the same test -> this hazard.\n";
+                print "  control red   for the same test -> ambient Windows CI flakiness.\n";
+              } else {
+                print "This is the CONTROL leg (untouched master), so these failures are\n";
+                print "ambient flakiness and disqualify the same test on the nopeek leg.\n";
+              }
+            }
+          '
+
+          # A genuine lost-FD_CLOSE hit has a specific shape: the standby stops
+          # replaying because its walreceiver is wedged in the connect loop, and
+          # the test gives up waiting.  That is the 2022 symptom.  Harness
+          # breakage looks nothing like it -- PermissionError, pg_ctl stop
+          # failed, rmtree -- so grep for the real signature rather than
+          # treating every red run as a detection.
+          echo
+          echo "=== catchup/recovery timeout signatures (the 2022 symptom) ==="
+          if grep -rIl --include='*log*' \
+               -e 'timed out waiting for catchup' \
+               -e 'never caught up' \
+               -e 'timed out waiting for xmin' \
+               -e 'timed out waiting for replay' \
+               build/testrun/ 2>/dev/null | tee /tmp/sig.txt | grep -q .; then
+            echo "FOUND in:"
+            cat /tmp/sig.txt
+            echo
+            echo "This is the shape a genuine hang takes.  Check the matching"
+            echo "control leg before concluding."
+          else
+            echo "none -- no test timed out waiting for a standby."
+          fi
+
+          echo
+          echo "=== harness-collision signatures (NOT a detection) ==="
+          if grep -rIl --include='*log*' \
+               -e 'PermissionError' \
+               -e 'pg_ctl stop failed' \
+               build/testrun/ 2>/dev/null | tee /tmp/harness.txt | grep -q .; then
+            echo "FOUND in:"
+            cat /tmp/harness.txt
+            echo "Treat any red leg with these as inconclusive, not as a result."
+          else
+            echo "none"
+          fi
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-tap-soak-${{ matrix.variant }}-${{ matrix.group }}
+          path: |
+            build/testrun/
+            build/meson-logs/
+            soak.out
+          if-no-files-found: warn
