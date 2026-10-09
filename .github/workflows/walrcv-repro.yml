@@ -1,0 +1,301 @@
+# Demonstrates the Winsock lost-FD_CLOSE walreceiver hang (fixed by
+# a8458f508a7, the MSG_PEEK in WaitEventSetWaitBlock()) in one run:
+#
+#   stock  - tree as committed; recovery/060_walrcv_graceful_close must PASS.
+#   nopeek - the MSG_PEEK block is deleted at CI time; the test must FAIL.
+#            The result is inverted for this leg, so a green leg means the
+#            bug was reproduced.
+#
+# Deliberately NOT setting PG_TEST_USE_UNIX_SOCKETS: cutproxy.pl connects to
+# the primary over TCP on 127.0.0.1, and merely defining that variable makes
+# the test cluster listen on a unix socket only.
+
+name: Walreceiver graceful-close repro
+
+on:
+  workflow_dispatch:
+    inputs:
+      attempts:
+        description: 'Connection attempts per run (WALRCV_ATTEMPTS)'
+        required: false
+        default: '300'
+  push:
+    branches:
+      - win32-disable-isolation-tests
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: Walreceiver repro - ${{ matrix.variant }}
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Untouched master.  Establishes that the test is sound on a stock
+          # tree and does not report a hang where there is none.
+          - variant: master
+            revert_graceful: false
+            revert_peek: false
+            expect: pass
+          # The proposed tree: 29992a6a509 reverted, i.e. graceful shutdown
+          # reapplied.  A backend that dies mid-message now closes gracefully
+          # rather than sending an RST, which is what makes the lost-FD_CLOSE
+          # hazard reachable from PostgreSQL itself.  Must still pass, because
+          # a8458f508a7 is present.
+          - variant: proposed
+            revert_graceful: true
+            revert_peek: false
+            expect: pass
+          # The proposed tree without a8458f508a7.  Must fail: this is the
+          # 2022 walreceiver regression that got graceful shutdown reverted,
+          # and the evidence that a8458f508a7 is a hard prerequisite for
+          # reapplying it.
+          - variant: proposed-nopeek
+            revert_graceful: true
+            revert_peek: true
+            expect: fail
+
+    env:
+      TAR: "c:/windows/system32/tar.exe"
+      VARIANT: ${{ matrix.variant }}
+      EXPECT: ${{ matrix.expect }}
+      # Empty on push events; the test step only exports it when non-empty.
+      ATTEMPTS_INPUT: ${{ github.event.inputs.attempts }}
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Disable Windows Defender
+        shell: pwsh
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true -SubmitSamplesConsent NeverSend -MAPSReporting Disable
+
+      - uses: actions/checkout@v6
+        with:
+          # Full history: the nopeek leg resolves commit a8458f508a7.
+          fetch-depth: 0
+
+      # The TAP tests build an initdb template under build/tmp_install and
+      # then `robocopy` it into per-test data directories. Robocopy with the
+      # default /COPY:DAT flag doesn't copy ACLs — destinations inherit from
+      # their parent dir. On GitHub-hosted Windows runners the workspace's
+      # inherited ACL grants Administrators:(F) and Users:(RX) but does NOT
+      # grant the runner user (runneradmin) directly. That matters because
+      # pg_ctl on Windows uses CreateRestrictedProcess to drop admin
+      # privileges from postmaster, so the postmaster process has the user
+      # SID in its token but no longer the Administrators group — leaving it
+      # with only "Users:(RX)" on pg_control and friends, which causes
+      # "PANIC: could not open file global/pg_control: Permission denied".
+      #
+      # Fix it once on the workspace dir with (OI)(CI) inheritance flags so
+      # every file/dir created underneath gets an explicit grant for the
+      # current user.
+      - name: Grant workspace ACL to runner user
+        shell: pwsh
+        run: |
+          icacls "${{ github.workspace }}" /grant "${env:USERNAME}:(OI)(CI)F" /Q | Out-Null
+          Write-Host "Granted Full Control to $env:USERNAME on ${{ github.workspace }}"
+
+      # Install some dependencies via msys64, that seems to be the fastest and
+      # most reliable
+      - name: Install dependencies, Mingw
+        shell: 'C:\msys64\usr\bin\bash.exe --login -eo pipefail "{0}"'
+        run: |
+          pacman -S --noconfirm --needed --asdeps \
+            bison flex
+
+          # Make bison and flex visible
+          echo C:/msys64/usr/bin >> "$GITHUB_PATH"
+
+          # Don't prefer mingw's perl
+          echo C:/Strawberry/perl/bin >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          # meson is not preinstalled on windows-2022. Install via pip
+          echo ::group::pip
+          python -m pip install --upgrade meson
+          if (!$?) { throw 'cmdfail' }
+          echo ::endgroup::
+
+          # Install IPC::Run.
+          # - recommends_policy=0 keeps cpan from pulling in IO::Tty / IO::Pty,
+          #   which don't build on Windows ("This module requires a POSIX
+          #   compliant system to work").
+          # - Pin to NJM/IPC-Run-20250809.0 because TODDR/IPC-Run-20260322.0
+          #   broke postgres tap tests on Windows (changed pipe stdio
+          #   handling). See upstream pg-vm-images commit ff5238afa3 and
+          #   the thread at
+          #   https://postgr.es/m/CAN55FZ06xanSbJdHe-CurjX_qNuBWZDEvS1kAk36L38YCtZXnw%40mail.gmail.com
+          echo ::group::cpan_ipc_run
+          "o conf recommends_policy 0`no conf commit`nnotest install NJM/IPC-Run-20250809.0.tar.gz" | cpan
+          if (!$?) { throw 'cmdfail' }
+          perl -mIPC::Run -e 1
+          if (!$?) { throw 'cmdfail' }
+          echo ::endgroup::
+
+      # Revert 29992a6a509, "Revert graceful shutdown changes for Windows",
+      # i.e. put shutdown(SD_SEND) + closesocket() back into socket_close().
+      # This is the change under proposal.  It is not what the proxy does --
+      # cutproxy.pl closes gracefully regardless -- but it is what makes a
+      # real PostgreSQL backend able to produce a graceful mid-message close,
+      # and therefore what makes this hazard reachable in practice.
+      #
+      # Unlike a8458f508a7 this one still reverts cleanly on master.
+      - name: Revert 29992a6a509 (graceful shutdown)
+        if: matrix.revert_graceful
+        shell: bash
+        run: |
+          set -eu
+          f=src/backend/libpq/pqcomm.c
+          before=$(grep -c 'closesocket(MyProcPort->sock)' "$f" || true)
+          echo "closesocket() calls before: $before"
+          git revert -n 29992a6a509
+          after=$(grep -c 'closesocket(MyProcPort->sock)' "$f" || true)
+          echo "closesocket() calls after: $after"
+          if [ "$after" -eq 0 ]; then
+            echo "::error::graceful shutdown was not restored in $f"
+            exit 1
+          fi
+          git --no-pager diff --cached --stat
+
+      # Only on the nopeek leg: revert a8458f508a7, "Fix lost Windows socket
+      # EOF events", so the test runs against a tree without that fix.
+      #
+      # That commit landed in src/backend/storage/ipc/latch.c.  The code has
+      # since moved to waiteventset.c, so a plain `git revert a8458f508a7`
+      # conflicts on current master.  Retarget the path and apply the commit
+      # in reverse: same change, rebased onto the current file layout.
+      - name: Revert a8458f508a7 (MSG_PEEK fix)
+        if: matrix.revert_peek
+        shell: bash
+        run: |
+          set -eu
+          f=src/backend/storage/ipc/waiteventset.c
+          before=$(grep -c MSG_PEEK "$f" || true)
+          echo "MSG_PEEK occurrences before: $before"
+          if [ "$before" -eq 0 ]; then
+            echo "::error::MSG_PEEK not present before the revert; nothing to undo"
+            exit 1
+          fi
+
+          git show a8458f508a7 -- src/backend/storage/ipc/latch.c \
+            | sed 's|src/backend/storage/ipc/latch\.c|src/backend/storage/ipc/waiteventset.c|g' \
+            | git apply -R -3 -
+
+          after=$(grep -c MSG_PEEK "$f" || true)
+          echo "MSG_PEEK occurrences after: $after"
+          if [ "$after" -ne 0 ]; then
+            echo "::error::MSG_PEEK still present in $f after the revert"
+            exit 1
+          fi
+          git --no-pager diff --stat
+
+      - name: Configure
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson setup ^
+            --backend ninja ^
+            -Dauto_features=disabled ^
+            -Dcassert=true ^
+            -Dinjection_points=true ^
+            -Dtap_tests=enabled ^
+            --buildtype debug ^
+            -DTAR=${{env.TAR}} ^
+            build
+
+      - name: Build
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          ninja -C build all testprep || exit 1
+
+      # Creates build/tmp_install and the initdb template that
+      # PostgreSQL::Test::Cluster->init() robocopies from.  Without it every
+      # TAP test dies in under a second with "failed to execute command
+      # robocopy ... tmp_install/initdb-template".
+      - name: Prepare test install
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson test --no-rebuild -C build --suite setup --logbase setup
+
+      # Each leg declares what it expects.  A verdict that does not match is a
+      # job failure, and "no verdict at all" is always reported as build or
+      # infrastructure trouble rather than as a result, so a broken build can
+      # never masquerade as a reproduction.
+      - name: Run recovery/060_walrcv_graceful_close
+        shell: bash
+        run: |
+          set -u
+          if [ -n "${ATTEMPTS_INPUT:-}" ]; then
+            export WALRCV_ATTEMPTS="$ATTEMPTS_INPUT"
+          fi
+          # Let the attempt budget, not the clock, govern: the test's own time
+          # ceiling defaults to 600 s and would die first on a slow runner.
+          export WALRCV_SECS=1800
+          echo "variant=$VARIANT expect=$EXPECT WALRCV_ATTEMPTS=${WALRCV_ATTEMPTS:-<unset, test default>}"
+
+          set +e
+          meson test --print-errorlogs --no-rebuild --timeout-multiplier 4 -C build \
+            recovery/060_walrcv_graceful_close 2>&1 | tee meson-test.out
+          rc=${PIPESTATUS[0]}
+          set -e
+
+          # Read meson's machine-readable log (JSON lines, one test per line)
+          # rather than scraping the console.  Prints OK, FAIL, or nothing if
+          # the file is missing, unparseable, or has no matching test.
+          verdict=$(perl -MJSON::PP -e '
+            my $v = "";
+            if (open(my $fh, "<", "build/meson-logs/testlog.json")) {
+              while (my $line = <$fh>) {
+                my $r = eval { decode_json($line) };
+                next unless ref($r) eq "HASH" && defined $r->{name};
+                next unless index($r->{name}, "060_walrcv_graceful_close") >= 0;
+                $v = $r->{result} // "";
+              }
+            }
+            print $v;
+          ' || true)
+          echo "meson exit code: $rc; test verdict: '${verdict:-none}'"
+
+          case "$EXPECT:$verdict" in
+            pass:OK)
+              echo "$VARIANT: test passed, as expected -- no walreceiver hung."
+              exit 0
+              ;;
+            pass:FAIL)
+              echo "::error::$VARIANT: the test FAILED on a build that carries a8458f508a7, so a walreceiver hung where it should not. That is a real regression, not a flake."
+              exit 1
+              ;;
+            fail:FAIL)
+              echo "$VARIANT: test failed, as expected -- the lost-FD_CLOSE hang was reproduced."
+              exit 0
+              ;;
+            fail:OK)
+              echo "::error::$VARIANT: the test PASSED, i.e. the hang did NOT reproduce this time."
+              echo "At a ~1.6% per-attempt hazard with a 300-attempt budget, detection is ~99%, so a pass is expected roughly 1 run in 100. This means 'did not reproduce this time', not 'the fix is unnecessary'. Re-run the job."
+              exit 1
+              ;;
+            *)
+              echo "::error::$VARIANT: no FAIL/OK verdict for the test (verdict '${verdict:-none}', meson exit $rc). This is a build or infrastructure problem, not a test result."
+              exit 1
+              ;;
+          esac
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: walrcv-repro-logs-${{ matrix.variant }}
+          path: |
+            build/testrun/
+            build/meson-logs/
+            meson-test.out
+          if-no-files-found: warn
