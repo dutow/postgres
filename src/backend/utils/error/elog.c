@@ -4001,6 +4001,26 @@ static void
 send_message_to_frontend(ErrorData *edata)
 {
 	StringInfoData msgbuf;
+	bool		noblock;
+
+	/*
+	 * Don't wait for the client while interrupts are held off or inside a
+	 * critical section.  We may hold LWLocks or have shared state in flux,
+	 * and a client that stops reading would keep us there for as long as it
+	 * likes, with no way to terminate us.  So queue the message only if that
+	 * cannot block, and drop it otherwise; it still goes to the server log
+	 * if that is enabled.  ERROR and above are sent normally, the client
+	 * needs those to make sense of the failure.
+	 */
+	noblock = edata->elevel < ERROR &&
+		(InterruptHoldoffCount > 0 || CritSectionCount > 0);
+
+	if (noblock)
+	{
+		pq_flush_if_writable();
+		if (pq_is_send_pending())
+			return;
+	}
 
 	/*
 	 * We no longer support pre-3.0 FE/BE protocol, except here.  If a client
@@ -4128,6 +4148,13 @@ send_message_to_frontend(ErrorData *edata)
 
 		pq_sendbyte(&msgbuf, '\0'); /* terminator */
 
+		/* the send buffer is empty, but a bigger message would be written out */
+		if (noblock && msgbuf.len + 5 > PQ_SEND_BUFFER_SIZE)
+		{
+			pfree(msgbuf.data);
+			return;
+		}
+
 		pq_endmessage(&msgbuf);
 	}
 	else
@@ -4160,7 +4187,10 @@ send_message_to_frontend(ErrorData *edata)
 	 * messages should not be a performance-critical path anyway, so an extra
 	 * flush won't hurt much ...
 	 */
-	pq_flush();
+	if (noblock)
+		pq_flush_if_writable();
+	else
+		pq_flush();
 }
 
 

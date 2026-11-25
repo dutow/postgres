@@ -33,6 +33,12 @@ typedef struct WaitEventSet WaitEventSet;
 #define PQ_SMALL_MESSAGE_LIMIT	10000
 #define PQ_LARGE_MESSAGE_LIMIT	(MaxAllocSize - 1)
 
+/*
+ * Initial size of the backend's send buffer.  It never shrinks, so a message
+ * up to this size (header included) always fits once the buffer is empty.
+ */
+#define PQ_SEND_BUFFER_SIZE 8192
+
 typedef struct
 {
 	void		(*comm_reset) (void);
